@@ -1,0 +1,45 @@
+Sound Canvas Bridge 1.0.0
+
+Original bridge code: Copyright (c) 2026 Andre Louis / OnjMusic, MIT.
+The JUCE-based official application and plug-ins are distributed under GNU
+Affero General Public License version 3. The original bridge source is also
+available separately under MIT. No warranty is provided.
+
+JUCE 8.0.15
+Copyright (c) Raw Material Software Limited and contributors.
+Revision: 91ad83ae34a81e0833b1a2b0866f54846370ae53
+Source: https://github.com/juce-framework/JUCE
+Licence: GNU AGPLv3 for these distributed binaries.
+JUCE's upstream licence and bundled-dependency list are included in ThirdParty.
+The exact source revision, build instructions and complete project source are
+available at https://github.com/OnjLouis/sound-canvas-bridge.
+
+Clipman startup/update preferences patterns
+Copyright (c) 2026 Clipman contributors. MIT.
+
+ElevenLabs Music Generator accessibility/help and update patterns
+Copyright (c) 2026 Andre Louis. MIT.
+
+MIT licence for the two preceding attributions:
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Roland Sound Canvas VA is an external, owner-installed dependency. No Roland
+binary, ROM, licence key or installer is distributed in this project. Roland,
+Sound Canvas and associated product names remain their owners' trademarks.
