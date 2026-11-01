@@ -400,15 +400,20 @@ enum Maintenance {
         // wait for this process to exit before unmounting, including on Cancel.
         defer {
             if let stage = updateStage {
-                let helper = URL(fileURLWithPath: "/Applications/\(bundles[0])/Contents/Resources/SoundCanvasMaintenance")
-                let task = Process(); task.executableURL = helper
-                task.arguments = ["--cleanup", stage.path, String(getpid())]
-                let log = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/OnjMusic/SoundCanvasBridge/UpdateCleanup.log")
-                FileManager.default.createFile(atPath: log.path, contents: nil)
-                let output = try? FileHandle(forWritingTo: log)
-                if let output { task.standardOutput = output; task.standardError = output }
-                defer { try? output?.close() }
-                do { try task.run() }
+                do {
+                    try validateCleanupStage(stage)
+                    let helper = stage.appendingPathComponent("Cleanup.app")
+                    try FileManager.default.copyItem(at: Bundle.main.bundleURL, to: helper)
+                    try verify(helper, id: installerID)
+                    let task = Process(); task.executableURL = Bundle(url: helper)?.executableURL
+                    task.arguments = ["--cleanup", stage.path, String(getpid())]
+                    let log = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/OnjMusic/SoundCanvasBridge/UpdateCleanup.log")
+                    FileManager.default.createFile(atPath: log.path, contents: nil)
+                    let output = try? FileHandle(forWritingTo: log)
+                    if let output { task.standardOutput = output; task.standardError = output }
+                    defer { try? output?.close() }
+                    try task.run()
+                }
                 catch { InstallerLog.write("Could not start update cleanup: \(error.localizedDescription)") }
             }
         }
@@ -451,17 +456,34 @@ enum Maintenance {
         return ["status": "installed"]
     }
 
-    static func cleanup(stage: URL, installerPID: Int32) throws {
+    static func validateCleanupStage(_ stage: URL) throws {
         let fm = FileManager.default
         guard stage.lastPathComponent.hasPrefix("SoundCanvasUpdate-"), stage.deletingLastPathComponent().standardizedFileURL == fm.temporaryDirectory.standardizedFileURL,
               stage.resolvingSymlinksInPath().standardizedFileURL == stage.standardizedFileURL,
               fm.fileExists(atPath: stage.appendingPathComponent("Release.json").path) else {
             throw MaintenanceError.failed("Unexpected update cleanup location.")
         }
+    }
+
+    static func cleanup(stage: URL, installerPID: Int32) throws {
+        try validateCleanupStage(stage)
+        let fm = FileManager.default
         let deadline = Date().addingTimeInterval(30)
         while kill(installerPID, 0) == 0 && Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
         guard kill(installerPID, 0) != 0 else { throw MaintenanceError.failed("The installer is still open; its download was retained.") }
-        _ = try run("/usr/bin/hdiutil", ["detach", stage.appendingPathComponent("Mounted").path])
+        // LaunchServices can retain the image briefly after the installer exits.
+        // Retry ordinary unmounts; never force an image out from under a process.
+        var unmounted = false
+        for attempt in 0..<8 {
+            do {
+                _ = try run("/usr/bin/hdiutil", ["detach", stage.appendingPathComponent("Mounted").path])
+                unmounted = true; break
+            } catch {
+                if attempt == 7 { throw error }
+                Thread.sleep(forTimeInterval: 0.5)
+            }
+        }
+        guard unmounted else { throw MaintenanceError.failed("The update image is still in use; its download was retained.") }
         try fm.removeItem(at: stage)
     }
 
