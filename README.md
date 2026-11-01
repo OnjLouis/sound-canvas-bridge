@@ -67,6 +67,11 @@ SysEx dump: retain external initialisation in your project for unmapped settings
 Part MFX enables routing to the current MFX; it is not a full MFX algorithm editor.
 The standalone receives MIDI, but is not a MIDI-file browser or onscreen keyboard.
 
+Update cleanup never forces a busy disk image to unmount. If macOS keeps a
+cancelled image busy beyond the bounded retries, the temporary download is
+retained and the result is recorded in `UpdateCleanup.log` in the app's log folder.
+Installed files and ongoing playback are unaffected by cancelling the installer.
+
 ## Source and Building
 
 See [BUILDING.md](BUILDING.md). No Roland files are needed to compile; playback
