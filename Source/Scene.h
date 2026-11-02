@@ -3,6 +3,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <cstring>
 
 namespace scbridge {
 // Only exposed bridge settings, never sample data or vendor code. The byte-only
@@ -12,8 +13,12 @@ struct EngineScene {
     uint8_t parts[16][8]{};
     uint8_t globals[34]{};
     uint8_t drums[2][6][128]{};
+    InsertionState insertion;
 };
-static_assert(sizeof(EngineScene)==1922);
+constexpr size_t legacySceneSize=1922;
+constexpr unsigned sceneVersion=2;
+static_assert(offsetof(EngineScene,insertion)==legacySceneSize);
+static_assert(sizeof(EngineScene)==1952);
 inline bool validScene(const EngineScene& scene) {
     for(int part=0;part<16;++part) {
         for(unsigned i=1;i<15;++i) {
@@ -29,7 +34,14 @@ inline bool validScene(const EngineScene& scene) {
         if(scene.globals[i-24]<controls[i].minimum || scene.globals[i-24]>controls[i].maximum) return false;
     for(const auto& setup:scene.drums) for(const auto& field:setup)
         for(auto value:field) if(value>127) return false;
-    return true;
+    return validInsertionState(scene.insertion);
+}
+inline bool decodeScene(unsigned version,const void* bytes,size_t size,EngineScene& destination) {
+    if(!bytes || !((version==1 && size==legacySceneSize) || (version==sceneVersion && size==sizeof(EngineScene)))) return false;
+    EngineScene scene;
+    std::memcpy(&scene,bytes,size);
+    if(!validScene(scene)) return false;
+    destination=scene;return true;
 }
 struct StateFrame {
     uint32_t sceneValid=0;

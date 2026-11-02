@@ -50,6 +50,7 @@ bool choiceControl(unsigned i) {
     const auto unit=scbridge::controls[i].unit;
     return i==1 || i==15 || unit==scbridge::ControlUnit::ReverbType || unit==scbridge::ControlUnit::ChorusType ||
            unit==scbridge::ControlUnit::DelayType || unit==scbridge::ControlUnit::Setup ||
+           unit==scbridge::ControlUnit::InsertionType ||
            unit==scbridge::ControlUnit::LowFrequency || unit==scbridge::ControlUnit::HighFrequency;
 }
 
@@ -60,8 +61,14 @@ juce::String controlHelp(unsigned index) {
         return "Selects the MIDI drum note edited by the drum controls. Selecting a note does not play it or change its settings. All 128 MIDI notes are available.";
     if(index==scbridge::drumSetupIndex)
         return "Selects GS Drum Setup 1 or 2. Part 10 normally uses Setup 1; a MIDI file can assign either setup to other parts. This selects an editor, not a new kit.";
+    if(index==scbridge::insertionSelectorIndex)
+        return "Selects insertion-effect parameter 1 to 20 for the Insertion Value control. Selection alone does not alter any effect setting. Parameter functions depend on the chosen algorithm; unused slots have no audible effect. The numbered EFX Parameter controls edit the same slots directly.";
+    if(index==scbridge::insertionTypeIndex)
+        return "Selects Thru or one of 64 insertion-effect algorithms shared by this instance. A type change recalls that algorithm's native defaults. Turn on Part MFX for each part you want to hear through the effect. Part MFX is routing, not a second effect instance.";
+    if(index==23)
+        return "Routes the selected MIDI part through the shared insertion effect. Select a non-Thru Insertion Type to hear processing. Other parts have independent routing switches but share this instance's insertion algorithm and settings.";
     juce::String help=juce::String("Adjusts ")+control.name+". ";
-    if(control.scope==scbridge::ControlScope::Global)
+    if(control.scope==scbridge::ControlScope::Global || control.scope==scbridge::ControlScope::InsertionParameter)
         help+="This is shared by all MIDI parts in this instance. Effect types recall their associated settings; their readouts follow the engine. ";
     else if(control.scope==scbridge::ControlScope::Drum)
         help+="Edits the selected MIDI note within Drum Setup 1 or 2. Values follow the kit's actual settings. ";
@@ -113,9 +120,9 @@ public:
             }
         }
         page.setComponentID("controlPage");page.setName("Control page");page.setTitle("Control page");
-        page.setTooltip("Selects Main, Tone, Master, Reverb, Chorus, Delay, EQ or Drums controls. This changes only the displayed controls, not the sound.");
+        page.setTooltip("Selects Main, Tone, Master, Reverb, Chorus, Delay, EQ, Drums or Insertion controls. Insertion Parameters pages expose all 20 slots directly. This changes only the displayed controls, not the sound.");
         page.setDescription(page.getName());page.setHelpText(page.getTooltip());
-        page.addItemList({"Main","Tone","Master","Reverb","Chorus","Delay","EQ","Drums"},1);
+        page.addItemList({"Main","Tone","Master","Reverb","Chorus","Delay","EQ","Drums","Insertion","Insertion Parameters 1-10","Insertion Parameters 11-20"},1);
         page.setSelectedId(1,juce::dontSendNotification);
         page.onChange=[this] { showPage(); };page.setExplicitFocusOrder(1);
         addAndMakeVisible(page);
@@ -166,7 +173,10 @@ private:
             const bool visible=selected==1 ? i<16 : selected==2 ? i>=16 && i<24 :
                 selected==3 ? i>=24 && i<27 : selected==4 ? i>=27 && i<34 :
                 selected==5 ? i>=34 && i<43 : selected==6 ? i>=43 && i<54 :
-                selected==7 ? i>=54 && i<58 : i>=58;
+                selected==7 ? i>=54 && i<58 : selected==8 ? i>=58 && i<66 :
+                selected==9 ? i==23 || (i>=scbridge::insertionTypeIndex && i<scbridge::insertionFirstDirectIndex) :
+                selected==10 ? i>=scbridge::insertionFirstDirectIndex && i<scbridge::insertionFirstDirectIndex+10 :
+                i>=scbridge::insertionFirstDirectIndex+10;
             labels[i].setVisible(visible);
             auto& control=controlAt(i);control.setVisible(visible);
             control.setExplicitFocusOrder(static_cast<int>(i+2));
@@ -505,7 +515,7 @@ public:
         if(haveSnapshot) savedScene=snapshot;
         else restoredState.read(savedScene);
         if(savedScene.sceneValid) {
-            auto* scene=xml->createNewChildElement("BridgeScene");scene->setAttribute("version",1);
+            auto* scene=xml->createNewChildElement("BridgeScene");scene->setAttribute("version",static_cast<int>(scbridge::sceneVersion));
             scene->addTextElement(juce::MemoryBlock(&savedScene.scene,sizeof(savedScene.scene)).toBase64Encoding());
         }
         copyXmlToBinary(*xml, destination);
@@ -517,10 +527,8 @@ public:
             scbridge::StateFrame restored;
             if(auto* saved=xml->getChildByName("BridgeScene")) {
                 juce::MemoryBlock bytes;
-                if(saved->getIntAttribute("version")!=1 || !bytes.fromBase64Encoding(saved->getAllSubText()) ||
-                   bytes.getSize()!=sizeof(restored.scene)) return;
-                std::memcpy(&restored.scene,bytes.getData(),sizeof(restored.scene));
-                if(!scbridge::validScene(restored.scene)) return;
+                if(!bytes.fromBase64Encoding(saved->getAllSubText()) ||
+                   !scbridge::decodeScene(saved->getIntAttribute("version"),bytes.getData(),bytes.getSize(),restored.scene)) return;
                 restored.sceneValid=1;
                 xml->removeChildElement(saved,true);
             }
@@ -601,6 +609,9 @@ private:
         if((scope==scbridge::ControlScope::Part || (index>0 && index<15)) && !sameContext(0)) return false;
         if(scope==scbridge::ControlScope::Drum &&
            (!sameContext(scbridge::drumNoteIndex) || !sameContext(scbridge::drumSetupIndex))) return false;
+        if((scope==scbridge::ControlScope::InsertionParameter || index>=scbridge::insertionFirstDirectIndex) &&
+           !sameContext(scbridge::insertionTypeIndex)) return false;
+        if(scope==scbridge::ControlScope::InsertionParameter && !sameContext(scbridge::insertionSelectorIndex)) return false;
         return true;
     }
     static void preferencesChanged(CFNotificationCenterRef, void* observer, CFStringRef, const void*, CFDictionaryRef) {
@@ -683,6 +694,7 @@ private:
                 if (i == 15) return value ? "Selected Part" : "Multitimbral";
                 if (i == 5) return value == 64 ? "Centre" : juce::String(value);
                 const auto unit=scbridge::controls[i].unit;
+                if(unit==scbridge::ControlUnit::InsertionType) return scbridge::insertionTypes[value].name;
                 if(unit==scbridge::ControlUnit::Switch) return value ? "On" : "Off";
                 if(unit==scbridge::ControlUnit::Setup) return juce::String(value+1);
                 if(unit==scbridge::ControlUnit::Signed64 || unit==scbridge::ControlUnit::DrumPitch) {

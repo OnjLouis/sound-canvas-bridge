@@ -51,7 +51,7 @@ public:
         }
         return true;
     }
-    int read(unsigned index, int part, int note, int setup) const {
+    int read(unsigned index, int part, int note, int setup, int insertionParameter=1) const {
         if(!data || index<legacyParameterCount || index>=parameterCount ||
            part<0 || part>15 || note<0 || note>127 || setup<0 || setup>1) return -1;
         const auto& definition=controls[index];
@@ -60,7 +60,12 @@ public:
             case ControlScope::Global: value=data[definition.offset];break;
             case ControlScope::Part: value=parts[0x3dc+gsPart(part)*0x488+definition.offset];break;
             case ControlScope::Drum: value=drums[setup*0x50c+definition.offset+note];break;
-            case ControlScope::Selector: return index==drumNoteIndex ? note : setup;
+            case ControlScope::Selector: return index==drumNoteIndex ? note : index==drumSetupIndex ? setup : insertionParameter;
+            case ControlScope::InsertionType:
+                value=insertionTypeIndexForCode(data[insertionTypeOffset+1],data[insertionTypeOffset]);break;
+            case ControlScope::InsertionParameter:
+                if(insertionParameter<1 || insertionParameter>static_cast<int>(insertionParameterCount)) return -1;
+                value=data[insertionFirstParameterOffset+insertionParameter-1];break;
             default: return -1;
         }
         return value>=definition.minimum && value<=definition.maximum ? value : -1;
@@ -78,7 +83,16 @@ public:
             const int value=read(field+60,0,note,setup);if(value<0) return false;
             scene.drums[setup][field][note]=static_cast<uint8_t>(value);
         }
-        return true;
+        auto& insertion=scene.insertion;
+        const int type=read(insertionTypeIndex,0,36,0);
+        if(type<0) return false;
+        insertion.type=static_cast<uint8_t>(type);
+        for(unsigned i=0;i<insertionParameterCount;++i) insertion.parameters[i]=data[insertionFirstParameterOffset+i];
+        insertion.toReverb=data[0xb940];insertion.toChorus=data[0xb941];insertion.toDelay=data[0xb942];insertion.eq=data[0xb946];
+        insertion.controlSource1=data[0xb948];insertion.controlDepth1=data[0xb949];
+        insertion.controlSource2=data[0xb94a];insertion.controlDepth2=data[0xb94b];
+        insertion.valid=1;
+        return validInsertionState(insertion);
     }
 private:
     static bool readable(const void* pointer,size_t required) {

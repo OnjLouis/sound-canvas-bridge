@@ -2,6 +2,7 @@
 #include "WorkerScheduling.h"
 #include "ControllerMirror.h"
 #include "CoreState.h"
+#include "ControlMessage.h"
 #include <dlfcn.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
@@ -83,16 +84,15 @@ int main(int argc, char** argv) {
             if(shared->reset && shared->restoreSceneValid && advancedReady) {
                 const auto& scene=shared->restoredScene;
                 if(!validScene(scene)) return 14;
-                std::array<std::array<uint8_t,11>,64> messages{};
+                std::array<ControlMessage,64> messages{};
                 unsigned messageCount=0;
-                auto dt1=[&](unsigned address,int value) {
-                    auto& data=messages[messageCount++];
-                    data={0xf0,0x41,0x10,0x42,0x12,static_cast<uint8_t>(address>>16),
-                        static_cast<uint8_t>((address>>8)&127),static_cast<uint8_t>(address&127),
-                        static_cast<uint8_t>(value),0,0xf7};
-                    data[9]=(128-((data[5]+data[6]+data[7]+data[8])&127))&127;
-                    longMidi(data.data(),0);
+                auto queueMessage=[&](ControlMessage message) {
+                    auto& queued=messages[messageCount++];queued=message;
+                    longMidi(queued.bytes.data(),0);
                     if(messageCount==messages.size()) { render(shared->left,shared->right,32);messageCount=0; }
+                };
+                auto dt1=[&](unsigned address,int value) {
+                    queueMessage(dt1Message(address,static_cast<uint8_t>(value)));
                 };
                 const int controllers[]={7,10,11,1,91,93,94};
                 const int toneNrpn[]={0x20,0x21,0x63,0x66};
@@ -110,6 +110,20 @@ int main(int argc, char** argv) {
                     dt1(controlAddress(index,channel,note,setup),value);
                 };
                 for(unsigned i=24;i<58;++i) restore(i,0,36,0,scene.globals[i-24]);
+                if(scene.insertion.valid) {
+                    const auto& insertion=scene.insertion;
+                    queueMessage(controlMessage(insertionTypeIndex,insertion.type,0,36,0));
+                    // Let the type macro initialise its defaults before restoring edits.
+                    render(shared->left,shared->right,512);messageCount=0;
+                    for(unsigned i=0;i<insertionParameterCount;++i)
+                        dt1(insertionFirstParameterAddress+i,insertion.parameters[i]);
+                    restore(insertionReverbIndex,0,36,0,insertion.toReverb);
+                    restore(insertionChorusIndex,0,36,0,insertion.toChorus);
+                    restore(insertionDelayIndex,0,36,0,insertion.toDelay);
+                    restore(insertionEqIndex,0,36,0,insertion.eq);
+                    dt1(0x40031b,insertion.controlSource1);dt1(0x40031c,insertion.controlDepth1);
+                    dt1(0x40031d,insertion.controlSource2);dt1(0x40031e,insertion.controlDepth2);
+                }
                 for(int channel=0;channel<16;++channel) for(unsigned i=16;i<24;++i)
                     restore(i,channel,36,0,scene.parts[channel][i-16]);
                 for(int setup=0;setup<2;++setup) for(int field=0;field<6;++field) for(int note=0;note<128;++note)
@@ -119,7 +133,7 @@ int main(int argc, char** argv) {
                 // A genuinely newer pending edit still wins over the snapshot.
                 int32_t actual[parameterCount]{};mirror.snapshot(part,p,actual);
                 for(unsigned i=legacyParameterCount;i<parameterCount;++i)
-                    actual[i]=coreState.read(i,part,p[drumNoteIndex],p[drumSetupIndex]);
+                    actual[i]=coreState.read(i,part,p[drumNoteIndex],p[drumSetupIndex],p[insertionSelectorIndex]);
                 for(unsigned i=0;i<parameterCount;++i) {
                     previous[i]=p[i];
                     if(actual[i]==p[i]) previousGenerations[i]=shared->generations[i];
@@ -141,17 +155,14 @@ int main(int argc, char** argv) {
                 send(0xb0 | part, 6, p[i]);
                 send(0xb0 | part, 99, 127); send(0xb0 | part, 98, 127);
             }
-            std::array<std::array<uint8_t,11>,parameterCount> advancedMessages{};
+            std::array<ControlMessage,parameterCount> advancedMessages{};
             bool advancedCommandsPending=false;
             if(advancedReady) for(unsigned i=legacyParameterCount;i<parameterCount;++i) {
                 if(!shared->generations[i] || !changed(i) || controls[i].scope==ControlScope::Selector) continue;
-                const auto address=controlAddress(i,part,p[drumNoteIndex],p[drumSetupIndex]);
-                auto& data=advancedMessages[i];
-                data={0xf0,0x41,0x10,0x42,0x12,static_cast<uint8_t>(address>>16),
-                    static_cast<uint8_t>((address>>8)&127),static_cast<uint8_t>(address&127),
-                    static_cast<uint8_t>(p[i]),0,0xf7};
-                data[9]=(128-((data[5]+data[6]+data[7]+data[8])&127))&127;
-                longMidi(data.data(),0);
+                auto& message=advancedMessages[i];
+                message=controlMessage(i,p[i],part,p[drumNoteIndex],p[drumSetupIndex],p[insertionSelectorIndex]);
+                if(!message.size) return 10;
+                longMidi(message.bytes.data(),0);
                 advancedCommandsPending=true;
             }
             std::copy(p, p + parameterCount, previous.begin());
@@ -184,7 +195,7 @@ int main(int argc, char** argv) {
             } else if(advancedCommandsPending) render(shared->left,shared->right,512);
             mirror.snapshot(part,p,shared->reported);
             for(unsigned i=legacyParameterCount;i<parameterCount;++i) {
-                const int actual=advancedReady ? coreState.read(i,part,p[drumNoteIndex],p[drumSetupIndex]) : -1;
+                const int actual=advancedReady ? coreState.read(i,part,p[drumNoteIndex],p[drumSetupIndex],p[insertionSelectorIndex]) : -1;
                 shared->reported[i]=actual>=0 ? actual : p[i];
             }
             mirror.capture(shared->capturedScene);

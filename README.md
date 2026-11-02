@@ -40,8 +40,9 @@ and User library. Browse **User / Roland Cloud / Sound Canvas**.
 ## Highlights
 
 - Sixteen-part MIDI playback and SysEx, with the original engine's compatibility maps.
-- Sixty-six controls, including tone shaping, vibrato, master settings, reverb,
-  chorus, delay, EQ and individual drum-note settings. NKS kits start on channel 10.
+- Ninety-three controls, including tone shaping, vibrato, master settings, reverb,
+  chorus, delay, EQ, insertion effects and individual drum-note settings.
+  NKS kits start on channel 10. The matching 1.1 NKS pack adds four insertion pages.
 - VoiceOver names, values, help tags and keyboard editing, including Enter-to-type.
 - A shared, saved bridge-latency setting: 128 samples initially, adjustable 32-2048.
 - Standalone virtual MIDI input plus selectable physical MIDI inputs and audio output.
@@ -64,7 +65,11 @@ and Komplete Kontrol playback, physical MIDI, state recall and installer rollbac
 
 Mapped state is saved across all parts and both drum setups. This is not a complete
 SysEx dump: retain external initialisation in your project for unmapped settings.
-Part MFX enables routing to the current MFX; it is not a full MFX algorithm editor.
+Insertion Type selects Thru or one of 64 native algorithms. All 20 parameter slots,
+output sends and EQ routing are editable; Part MFX enables each part's routing to
+the shared effect. Parameter slots use raw values and numbers because their
+functions depend on the algorithm. The matching NKS mappings require bridge 1.1.0.
+Saved scenes preserve insertion settings and remain compatible with older scenes.
 The standalone receives MIDI, but is not a MIDI-file browser or onscreen keyboard.
 
 Update cleanup never forces a busy disk image to unmount. If macOS keeps a
@@ -76,7 +81,7 @@ Installed files and ongoing playback are unaffected by cancelling the installer.
 
 See [BUILDING.md](BUILDING.md). No Roland files are needed to compile; playback
 requires the owner's installation. Public source contains the bridge, installer
-and two standalone unit tests, not personal settings or private deployment tools.
+and three standalone unit tests, not personal settings or private deployment tools.
 
 ## Licence and Contact
 

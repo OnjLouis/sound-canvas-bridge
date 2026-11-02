@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET 12.0 CACHE STRING "Minimum macOS version")
 endif()
-project(OnjSoundCanvasPilot VERSION 1.0.0 LANGUAGES C CXX OBJCXX)
+project(OnjSoundCanvasPilot VERSION 1.1.0 LANGUAGES C CXX OBJCXX)
 if(NOT APPLE)
     message(FATAL_ERROR "Sound Canvas Bridge currently supports macOS only")
 endif()
@@ -47,6 +47,7 @@ add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/SoundCanvasHelper"
         "${SOURCE}/Helper.cpp" -o "${CMAKE_BINARY_DIR}/SoundCanvasHelper"
     DEPENDS "${SOURCE}/Helper.cpp" "${SOURCE}/Protocol.h" "${SOURCE}/Controls.h"
         "${SOURCE}/CoreState.h" "${SOURCE}/Scene.h" "${SOURCE}/WorkerScheduling.h" "${SOURCE}/ControllerMirror.h"
+        "${SOURCE}/Insertion.h" "${SOURCE}/ControlMessage.h"
     VERBATIM)
 add_custom_target(SoundCanvasHelperBuild DEPENDS "${CMAKE_BINARY_DIR}/SoundCanvasHelper")
 add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/SoundCanvasMaintenance"
@@ -90,7 +91,7 @@ add_custom_target(SoundCanvasPlugins
 
 include(CTest)
 if(BUILD_TESTING)
-    foreach(name ControllerMirror Scene)
+    foreach(name ControllerMirror Scene Insertion)
         add_executable(${name}Tests "Tests/${name}Tests.cpp")
         target_include_directories(${name}Tests PRIVATE Source)
         set_target_properties(${name}Tests PROPERTIES OSX_ARCHITECTURES "arm64;x86_64")

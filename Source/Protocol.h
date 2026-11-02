@@ -4,7 +4,7 @@
 #include "Scene.h"
 
 namespace scbridge {
-constexpr uint32_t protocolVersion = 5;
+constexpr uint32_t protocolVersion = 6;
 constexpr uint32_t maxFrames = 4096;
 constexpr uint32_t maxEvents = 1024;
 constexpr uint32_t maxMidiBytes = 65536;

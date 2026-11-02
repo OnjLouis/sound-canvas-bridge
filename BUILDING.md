@@ -8,7 +8,7 @@ Git, and an Apple SDK supporting arm64 and x86_64. The official build used JUCE
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --parallel 4 --target \
   SoundCanvasStandaloneBundle SoundCanvasPlugins SoundCanvasInstallerBundle \
-  ControllerMirrorTests SceneTests
+  ControllerMirrorTests SceneTests InsertionTests
 ctest --test-dir build --output-on-failure
 ```
 
@@ -17,7 +17,7 @@ JUCE 8.0.15 checkout, add `-DJUCE_DIR=/path/to/JUCE` instead. JUCE's source and 
 of its dependency notices are available at that exact revision:
 https://github.com/juce-framework/JUCE/tree/91ad83ae34a81e0833b1a2b0866f54846370ae53
 
-The release's `SoundCanvasBridge-1.0.0-source.zip` also includes that JUCE source
+The release's versioned source ZIP also includes that JUCE source
 under `Dependencies/JUCE`. When using this archive, configure with
 `-DJUCE_DIR="$PWD/Dependencies/JUCE"` to build without fetching it again.
 
@@ -34,7 +34,8 @@ separately in a disposable host environment, without replacing a working install
 On Apple Silicon, running the engine helper requires Rosetta and your own original
 Sound Canvas VA installation. No engine or ROM download is part of this build.
 
-The public tests check controller/SysEx readback and concurrent scene snapshots
+The public tests check controller/SysEx readback, insertion messages and type
+mappings, old/new scene migration and concurrent scene snapshots
 without opening the proprietary engine or changing user settings. They do not
 replace real-host audio and VoiceOver acceptance tests.
 

@@ -1,10 +1,11 @@
 #pragma once
 #include <cstdint>
 #include <cstddef>
+#include "Insertion.h"
 
 namespace scbridge {
-enum class ControlScope { Legacy, Part, Global, Drum, Selector };
-enum class ControlUnit { Raw, Signed64, Pan, Switch, ReverbType, ChorusType, DelayType, DrumPitch, DrumNote, Setup, LowFrequency, HighFrequency };
+enum class ControlScope { Legacy, Part, Global, Drum, Selector, InsertionType, InsertionParameter };
+enum class ControlUnit { Raw, Signed64, Pan, Switch, ReverbType, ChorusType, DelayType, DrumPitch, DrumNote, Setup, LowFrequency, HighFrequency, InsertionType };
 struct ControlDefinition {
     const char* id;
     const char* name;
@@ -81,15 +82,43 @@ constexpr ControlDefinition controls[] = {
     {"drumPan","Drum Pan",0,127,64,ControlScope::Drum,0x410400,0x280,ControlUnit::Pan},
     {"drumReverb","Drum Reverb",0,127,0,ControlScope::Drum,0x410500,0x300},
     {"drumChorus","Drum Chorus",0,127,0,ControlScope::Drum,0x410600,0x380},
-    {"drumDelay","Drum Delay",0,127,0,ControlScope::Drum,0x410900,0x400}
+    {"drumDelay","Drum Delay",0,127,0,ControlScope::Drum,0x410900,0x400},
+    {"mfxType","Insertion Type",0,64,0,ControlScope::InsertionType,insertionTypeAddress,insertionTypeOffset,ControlUnit::InsertionType},
+    {"mfxParameter","Insertion Parameter",1,20,1,ControlScope::Selector,0,0},
+    {"mfxValue","Insertion Value",0,127,0,ControlScope::InsertionParameter,insertionFirstParameterAddress,insertionFirstParameterOffset},
+    {"mfxToReverb","Insertion To Reverb",0,127,40,ControlScope::Global,0x400317,0xb940},
+    {"mfxToChorus","Insertion To Chorus",0,127,0,ControlScope::Global,0x400318,0xb941},
+    {"mfxToDelay","Insertion To Delay",0,127,0,ControlScope::Global,0x400319,0xb942},
+    {"mfxEq","Insertion EQ",0,1,1,ControlScope::Global,0x40031f,0xb946,ControlUnit::Switch},
+    {"mfxParameter1","EFX Parameter 1",0,127,0,ControlScope::Global,0x400303,0xb92c},
+    {"mfxParameter2","EFX Parameter 2",0,127,0,ControlScope::Global,0x400304,0xb92d},
+    {"mfxParameter3","EFX Parameter 3",0,127,0,ControlScope::Global,0x400305,0xb92e},
+    {"mfxParameter4","EFX Parameter 4",0,127,0,ControlScope::Global,0x400306,0xb92f},
+    {"mfxParameter5","EFX Parameter 5",0,127,0,ControlScope::Global,0x400307,0xb930},
+    {"mfxParameter6","EFX Parameter 6",0,127,0,ControlScope::Global,0x400308,0xb931},
+    {"mfxParameter7","EFX Parameter 7",0,127,0,ControlScope::Global,0x400309,0xb932},
+    {"mfxParameter8","EFX Parameter 8",0,127,0,ControlScope::Global,0x40030a,0xb933},
+    {"mfxParameter9","EFX Parameter 9",0,127,0,ControlScope::Global,0x40030b,0xb934},
+    {"mfxParameter10","EFX Parameter 10",0,127,0,ControlScope::Global,0x40030c,0xb935},
+    {"mfxParameter11","EFX Parameter 11",0,127,0,ControlScope::Global,0x40030d,0xb936},
+    {"mfxParameter12","EFX Parameter 12",0,127,0,ControlScope::Global,0x40030e,0xb937},
+    {"mfxParameter13","EFX Parameter 13",0,127,0,ControlScope::Global,0x40030f,0xb938},
+    {"mfxParameter14","EFX Parameter 14",0,127,0,ControlScope::Global,0x400310,0xb939},
+    {"mfxParameter15","EFX Parameter 15",0,127,0,ControlScope::Global,0x400311,0xb93a},
+    {"mfxParameter16","EFX Parameter 16",0,127,0,ControlScope::Global,0x400312,0xb93b},
+    {"mfxParameter17","EFX Parameter 17",0,127,0,ControlScope::Global,0x400313,0xb93c},
+    {"mfxParameter18","EFX Parameter 18",0,127,0,ControlScope::Global,0x400314,0xb93d},
+    {"mfxParameter19","EFX Parameter 19",0,127,0,ControlScope::Global,0x400315,0xb93e},
+    {"mfxParameter20","EFX Parameter 20",0,127,0,ControlScope::Global,0x400316,0xb93f}
 };
 constexpr unsigned parameterCount = sizeof(controls) / sizeof(controls[0]);
 constexpr unsigned drumNoteIndex = 58, drumSetupIndex = 59;
 inline unsigned gsPart(int part) { return part == 9 ? 0u : part < 9 ? part + 1u : part; }
-inline uint32_t controlAddress(unsigned index, int part, int note, int setup) {
+inline uint32_t controlAddress(unsigned index, int part, int note, int setup, int insertionParameter=1) {
     const auto& control = controls[index];
     if (control.scope == ControlScope::Part) return control.address + (gsPart(part) << 8);
     if (control.scope == ControlScope::Drum) return control.address + (setup << 12) + note;
+    if (control.scope == ControlScope::InsertionParameter) return control.address + insertionParameter - 1;
     return control.address;
 }
 }
