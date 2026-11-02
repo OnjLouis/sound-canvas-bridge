@@ -7,6 +7,15 @@ enum MaintenanceError: LocalizedError {
     var errorDescription: String? { if case .failed(let text) = self { return text }; return nil }
 }
 
+let maximumReplyBytes = 3072
+func replyData(_ result: [String: Any]) throws -> Data {
+    let data = try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
+    guard data.count <= maximumReplyBytes else {
+        return try JSONSerialization.data(withJSONObject: ["status": "error", "message": "The update helper reply exceeded its limit. See the product page or installer log for details."], options: [.sortedKeys])
+    }
+    return data
+}
+
 struct BridgeRelease: Codable {
     let version: String
     let asset: String
@@ -183,7 +192,10 @@ enum Maintenance {
             _ = drained.wait(timeout: .now() + 2)
             throw MaintenanceError.failed("\(URL(fileURLWithPath: executable).lastPathComponent) did not finish in time.")
         }
-        _ = drained.wait(timeout: .now() + 2)
+        guard drained.wait(timeout: .now() + 2) == .success else {
+            try? pipe.fileHandleForReading.close()
+            throw MaintenanceError.failed("\(URL(fileURLWithPath: executable).lastPathComponent) left its output pipe open.")
+        }
         guard task.terminationStatus == 0 else {
             throw MaintenanceError.failed("\(URL(fileURLWithPath: executable).lastPathComponent) failed (\(task.terminationStatus)). " + String(decoding: output.data.suffix(2048), as: UTF8.self))
         }
@@ -523,6 +535,13 @@ enum Maintenance {
         return ["status": "verified", "version": version, "productionTrustChecks": true]
     }
     static func selfTest() throws -> [String: Any] {
+        guard try replyData(["status": "error", "message": String(repeating: "x", count: 8192)]).count <= maximumReplyBytes else {
+            throw MaintenanceError.failed("An oversized helper reply can block the parent output pipe.")
+        }
+        let verbose = String(repeating: "x", count: 20000)
+        guard try run("/usr/bin/printf", [verbose]) == Data(verbose.utf8) else {
+            throw MaintenanceError.failed("Subprocess output was truncated or blocked.")
+        }
         guard !isInstallerInterface(arguments: ["--apply", "/fixture", "1.0.0"], bundleID: installerID, effectiveUID: 0) else {
             throw MaintenanceError.failed("Privileged helper must not present an installer window.")
         }
@@ -609,7 +628,7 @@ do {
         let stage = args.count == 2 && args[0] == "--update-stage" ? URL(fileURLWithPath: args[1]) : nil
         result = try Maintenance.installer(updateStage: stage)
     } else { throw MaintenanceError.failed("Unknown maintenance command.") }
-    FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])); print("")
+    FileHandle.standardOutput.write(try replyData(result)); print("")
 } catch {
     let message = String(error.localizedDescription.prefix(4096))
     if Maintenance.isInstallerInterface(arguments: maintenanceArguments, bundleID: Bundle.main.bundleIdentifier, effectiveUID: geteuid()) {
@@ -617,6 +636,6 @@ do {
         let app = NSApplication.shared; app.setActivationPolicy(.regular); app.finishLaunching()
         _ = InstallerDialog(title: "Installation Could Not Finish", message: message, primaryTitle: "Close").show()
     }
-    let data = try! JSONSerialization.data(withJSONObject: ["status": "error", "message": message], options: [.sortedKeys])
+    let data = (try? replyData(["status": "error", "message": message])) ?? Data("{\"status\":\"error\",\"message\":\"Update helper failed.\"}".utf8)
     FileHandle.standardOutput.write(data); print(""); exit(1)
 }

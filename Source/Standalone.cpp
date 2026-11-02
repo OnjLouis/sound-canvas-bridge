@@ -8,6 +8,14 @@
 #include "MenuBarStatus.h"
 #include "TransientTooltip.h"
 #include "GeneralPreferences.h"
+#include "VirtualMidiInput.h"
+#include "StandaloneEditor.h"
+#include "StandaloneControls.h"
+#include "StandaloneAudio.h"
+#include "ControlHelp.h"
+#ifdef _WIN32
+#include "WindowsMenuBar.h"
+#endif
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter();
 
@@ -20,13 +28,20 @@ constexpr const char* virtualPortName="Sound Canvas Bridge";
 constexpr const char* donateUrl="https://onj.me/donate";
 constexpr const char* contactUrl="https://onj.me/contact";
 constexpr const char* projectUrl="https://github.com/OnjLouis/sound-canvas-bridge";
+constexpr int actionModifiers=juce::ModifierKeys::commandModifier;
+#ifdef _WIN32
+scbridge::WindowsMenuBar::Section windowsMidiMenu() {
+    return {"&MIDI",{allNotesOffCommand,panicCommand,0,gsResetCommand,gmResetCommand,restartEngineCommand},
+        {"&All Notes Off","&Panic: All Sounds Off",{},"&GS Reset...","G&M Reset...","&Restart Engine with Defaults..."}};
+}
+#endif
 
 bool commandInfo(juce::CommandID command,juce::ApplicationCommandInfo& result) {
     switch(command) {
         case audioSettingsCommand:
             result.setInfo("Preferences...","Audio, MIDI, update and startup preferences","Audio",0);
             result.addDefaultKeypress(',',juce::ModifierKeys::commandModifier);
-            result.addDefaultKeypress('u',juce::ModifierKeys::commandModifier|juce::ModifierKeys::shiftModifier);break;
+            break;
         case contextHelpCommand:
             result.setInfo("Help for Focused Control","Read the focused control's help","Help",0);
             result.addDefaultKeypress(juce::KeyPress::F1Key,0);break;
@@ -40,26 +55,52 @@ bool commandInfo(juce::CommandID command,juce::ApplicationCommandInfo& result) {
         case historyCommand: result.setInfo("Version History...","Read the bundled version history","Help",0);break;
         case donateCommand: result.setInfo("Donate","Open the donation page","Help",0);break;
         case contactCommand: result.setInfo("Contact","Open the contact page","Help",0);break;
-        case allNotesOffCommand: result.setInfo("All Notes Off","Release notes on all 16 MIDI channels; sustain may continue","MIDI",0);break;
+        case allNotesOffCommand:
+            result.setInfo("All Notes Off","Release notes on all 16 MIDI channels; sustain may continue","MIDI",0);
+            result.addDefaultKeypress(juce::KeyPress::F9Key,0);
+            break;
         case panicCommand:
             result.setInfo("Panic: All Sounds Off","Immediately stop voices without changing programs or effects","MIDI",0);
-            result.addDefaultKeypress('p',juce::ModifierKeys::commandModifier|juce::ModifierKeys::shiftModifier);break;
-        case gsResetCommand: result.setInfo("Send GS Reset...","Reset all parts and effects to native GS defaults","MIDI",0);break;
-        case gmResetCommand: result.setInfo("Send GM Reset...","Reset the original engine to General MIDI mode","MIDI",0);break;
+            result.addDefaultKeypress('p',actionModifiers);break;
+        case gsResetCommand:
+            result.setInfo("Send GS Reset...","Reset all parts and effects to native GS defaults","MIDI",0);
+            result.addDefaultKeypress('g',actionModifiers);break;
+        case gmResetCommand:
+            result.setInfo("Send GM Reset...","Reset the original engine to General MIDI mode","MIDI",0);
+            result.addDefaultKeypress('m',actionModifiers
+#ifndef _WIN32
+                |juce::ModifierKeys::shiftModifier
+#endif
+                );break;
         case restartEngineCommand:
             result.setInfo("Restart Engine with Defaults...","Recover even when normal MIDI reset messages are disabled","MIDI",0);
-            result.addDefaultKeypress('r',juce::ModifierKeys::commandModifier|juce::ModifierKeys::shiftModifier);break;
+            result.addDefaultKeypress('r',actionModifiers);break;
         case activityDisplayCommand:
             result.setInfo("Show MIDI Activity","Show or hide the coloured channel activity display","View",0);
-            result.addDefaultKeypress('d',juce::ModifierKeys::commandModifier|juce::ModifierKeys::shiftModifier);break;
+            result.addDefaultKeypress('d',actionModifiers);break;
         case readActivityCommand:
             result.setInfo("Read MIDI Activity","Read a snapshot without continuous announcements","View",0);
-            result.addDefaultKeypress('a',juce::ModifierKeys::commandModifier|juce::ModifierKeys::shiftModifier);break;
+            result.addDefaultKeypress('i',actionModifiers);break;
         case aboutCommand: result.setInfo("About Sound Canvas Bridge","Show application information","Help",0);break;
         case showControlsCommand: result.setInfo("Show Controls","Show the Sound Canvas controls window","View",0);break;
         case hideControlsCommand:
-            result.setInfo("Hide to Menu Bar","Keep playback running with only the menu-bar status item visible","View",0);
-            result.addDefaultKeypress('h',juce::ModifierKeys::commandModifier|juce::ModifierKeys::shiftModifier);break;
+            result.setInfo(
+#ifdef _WIN32
+                "Hide to System Tray",
+#else
+                "Hide to Menu Bar",
+#endif
+                "Keep playback running with only the status icon visible","View",0);
+            result.addDefaultKeypress('h',actionModifiers
+#ifndef _WIN32
+                |juce::ModifierKeys::shiftModifier
+#endif
+                );break;
+#ifdef _WIN32
+        case juce::StandardApplicationCommandIDs::quit:
+            result.setInfo("Exit","Stop playback and close Sound Canvas Bridge","File",0);
+            result.addDefaultKeypress('q',juce::ModifierKeys::ctrlModifier);break;
+#endif
         default: return false;
     }
     return true;
@@ -74,16 +115,19 @@ juce::String appVersion() {
 }
 
 juce::File applicationData() {
-    return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-        .getChildFile("Application Support/OnjMusic/SoundCanvasBridge");
+    return scbridge::performanceFile().getParentDirectory();
 }
 
 class MidiInputChoices final : public juce::Component {
 public:
     explicit MidiInputChoices(juce::AudioDeviceManager& manager):devices(manager) {
-        setName("System MIDI inputs");setComponentID("midiInputs");
+        setName("MIDI inputs");setTitle(getName());setComponentID("midiInputs");
         viewport.setViewedComponent(&content,false);viewport.setScrollBarsShown(true,false);
-        viewport.setName("Available MIDI inputs");addAndMakeVisible(viewport);refresh();
+        viewport.setName("Available MIDI inputs");viewport.setWantsKeyboardFocus(false);
+        addAndMakeVisible(viewport);refresh();
+    }
+    std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override {
+        return std::make_unique<juce::AccessibilityHandler>(*this,juce::AccessibilityRole::group);
     }
     void refresh() {
         const auto available=juce::MidiInput::getAvailableDevices();
@@ -118,10 +162,20 @@ public:
         for(size_t i=0;i<buttons.size();++i) buttons[i]->setBounds(0,static_cast<int>(i)*32,width,30);
     }
 private:
+    class Rows final : public juce::Component {
+        std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override {
+            return std::make_unique<juce::AccessibilityHandler>(*this,juce::AccessibilityRole::ignored);
+        }
+    };
+    class Scroller final : public juce::Viewport {
+        std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override {
+            return std::make_unique<juce::AccessibilityHandler>(*this,juce::AccessibilityRole::ignored);
+        }
+    };
     juce::AudioDeviceManager& devices;
     juce::Array<juce::MidiDeviceInfo> ports;
-    juce::Component content;
-    juce::Viewport viewport;
+    Rows content;
+    Scroller viewport;
     std::vector<std::unique_ptr<juce::ToggleButton>> buttons;
 };
 
@@ -131,6 +185,22 @@ public:
         :devices(manager),midi(manager),playTest(std::move(test)),testPlaying(std::move(playing)),onEngineChanged(std::move(engineChanged)) {
         setName("Audio settings");setTitle("Audio settings");
         setFocusContainerType(juce::Component::FocusContainerType::keyboardFocusContainer);
+#ifdef _WIN32
+        driverLabel.setText("Audio driver",juce::dontSendNotification);driverLabel.setAccessible(false);
+        driver.setName("Audio driver");driver.setTitle(driver.getName());driver.setExplicitFocusOrder(1);
+        driver.setHelpText("Select ASIO for your manufacturer's low-latency driver, or Windows Audio for WASAPI. Changing drivers briefly interrupts audio without resetting MIDI sounds.");
+        driver.setDescription(driver.getName());driver.setTooltip(driver.getHelpText());
+        driver.onChange=[this] {
+            const auto selected=driver.getText();
+            if(selected.isNotEmpty() && selected!=devices.getCurrentAudioDeviceType()) devices.setCurrentAudioDeviceType(selected,true);
+            update();
+        };
+        panel.setButtonText("Driver settings...");panel.setName("Driver settings");panel.setExplicitFocusOrder(6);
+        panel.setHelpText("Open the selected ASIO driver's own control panel. Availability and accessibility depend on its manufacturer.");
+        panel.setDescription(panel.getName());panel.setTooltip(panel.getHelpText());
+        panel.onClick=[this] { if(auto* device=devices.getCurrentAudioDevice()) device->showControlPanel(); };
+        addAndMakeVisible(driverLabel);addAndMakeVisible(driver);addAndMakeVisible(panel);
+#endif
         const char* names[]={"Output device","Sample rate","Audio buffer"};
         const char* help[]={"Chooses the audio output used by this standalone module. No audio input is opened.",
             "Chooses the sample rate supported by the selected output device.",
@@ -140,7 +210,11 @@ public:
             auto& choice=choices[i];choice.setName(names[i]);choice.setTitle(names[i]);
             choice.setComponentID(juce::String("audioSetting")+juce::String(i));
             choice.setDescription(names[i]);choice.setHelpText(help[i]);choice.setTooltip(help[i]);
-            choice.setWantsKeyboardFocus(true);choice.setExplicitFocusOrder(static_cast<int>(i+1));
+            choice.setWantsKeyboardFocus(true);choice.setExplicitFocusOrder(static_cast<int>(i+1)
+#ifdef _WIN32
+                +1
+#endif
+            );
             choice.onChange=[this,i] { apply(i); };
             addAndMakeVisible(labels[i]);addAndMakeVisible(choice);
         }
@@ -160,12 +234,16 @@ public:
         engineHeading.setText("Sound Canvas VA location",juce::dontSendNotification);engineHeading.setAccessible(false);
         enginePath.setName("Sound Canvas VA location");enginePath.setTitle(enginePath.getName());enginePath.setComponentID("engineLocation");
         enginePath.setReadOnly(true);enginePath.setMultiLine(false);enginePath.setTabKeyUsedAsCharacter(false);enginePath.setExplicitFocusOrder(8);
-        enginePath.setDescription(enginePath.getName());enginePath.setHelpText("Location of the original Sound Canvas VA VST bundle. Select and copy this path, or use Browse to choose another installation.");
+        enginePath.setDescription(enginePath.getName());enginePath.setHelpText("Location of the original Sound Canvas VA engine. Select and copy this path, or use Browse to choose another installation.");
         enginePath.setTooltip(enginePath.getHelpText());
         browse.setButtonText("Browse...");browse.setName("Browse for Sound Canvas VA");browse.setExplicitFocusOrder(9);
-        browse.setDescription(browse.getName());browse.setHelpText("Choose the original Sound Canvas VA VST bundle, not the bridge. A valid selection is saved and offers an engine restart.");
+        browse.setDescription(browse.getName());browse.setHelpText("Choose the original Sound Canvas VA engine, not the bridge. A valid selection is saved and offers an engine restart.");
         browse.setTooltip(browse.getHelpText());browse.onClick=[this] { chooseEngine(); };
         engineStatus.setName("Engine location status");engineStatus.setTitle(engineStatus.getName());engineStatus.setWantsKeyboardFocus(true);engineStatus.setExplicitFocusOrder(10);
+#ifdef _WIN32
+        refresh.setExplicitFocusOrder(5);midi.setExplicitFocusOrder(7);testButton.setExplicitFocusOrder(8);
+        status.setExplicitFocusOrder(9);enginePath.setExplicitFocusOrder(10);browse.setExplicitFocusOrder(11);engineStatus.setExplicitFocusOrder(12);
+#endif
         for(auto* control:std::initializer_list<juce::Component*>{&engineHeading,&enginePath,&browse,&engineStatus}) addAndMakeVisible(control);
         updateEnginePath();devices.addChangeListener(this);setSize(650,630);update();startTimer(150);timerCallback();
     }
@@ -178,9 +256,17 @@ public:
     }
 #endif
     void resized() override {
+#ifdef _WIN32
+        driverLabel.setBounds(12,12,150,32);driver.setBounds(164,12,getWidth()-176,32);
+        for(unsigned i=0;i<3;++i) { labels[i].setBounds(12,56+44*i,150,32);choices[i].setBounds(164,56+44*i,getWidth()-176,32); }
+        refresh.setBounds(164,190,160,32);panel.setBounds(340,190,180,32);
+        midiHeading.setBounds(12,226,getWidth()-24,24);midi.setBounds(12,254,getWidth()-24,134);
+#else
         for(unsigned i=0;i<3;++i) { labels[i].setBounds(12,12+44*i,150,32);choices[i].setBounds(164,12+44*i,getWidth()-176,32); }
         refresh.setBounds(164,148,160,32);midiHeading.setBounds(12,190,getWidth()-24,24);
-        midi.setBounds(12,218,getWidth()-24,170);testButton.setBounds(164,400,200,32);
+        midi.setBounds(12,218,getWidth()-24,170);
+#endif
+        testButton.setBounds(164,400,200,32);
         status.setBounds(12,444,getWidth()-24,56);
         engineHeading.setBounds(12,502,getWidth()-24,24);enginePath.setBounds(12,532,getWidth()-144,32);
         browse.setBounds(getWidth()-120,532,108,32);engineStatus.setBounds(12,576,getWidth()-24,44);
@@ -189,10 +275,16 @@ private:
     void updateEnginePath() {
         scbridge::EngineLocation location;const auto path=location.bundle();juce::String error;
         enginePath.setText(path.getFullPathName(),false);
-        engineStatus.setText(scbridge::EngineLocation::validate(path,error) ? "Sound Canvas VA installation found." : "Sound Canvas VA not found. Use Browse to choose its VST bundle.",juce::dontSendNotification);
+        engineStatus.setText(scbridge::EngineLocation::validate(path,error) ? "Sound Canvas VA installation found." : "Sound Canvas VA not found. Use Browse to choose its original engine.",juce::dontSendNotification);
     }
     void chooseEngine() {
-        chooser=std::make_unique<juce::FileChooser>("Choose Sound Canvas VA VST bundle",scbridge::EngineLocation().bundle().getParentDirectory(),"*.vst");
+        chooser=std::make_unique<juce::FileChooser>("Choose Sound Canvas VA",scbridge::EngineLocation().bundle().getParentDirectory(),
+#ifdef _WIN32
+            "SCCore.dll"
+#else
+            "*.vst"
+#endif
+        );
         juce::Component::SafePointer<AudioPreferences> safe(this);
         chooser->launchAsync(juce::FileBrowserComponent::openMode|juce::FileBrowserComponent::canSelectFiles,
             [safe](const juce::FileChooser& dialog) {
@@ -212,6 +304,12 @@ private:
         choice.setEnabled(!names.isEmpty());
     }
     void update() {
+#ifdef _WIN32
+        juce::StringArray types;
+        for(auto* type:devices.getAvailableDeviceTypes()) types.add(type->getTypeName());
+        fill(driver,types,types.indexOf(devices.getCurrentAudioDeviceType()));
+        panel.setEnabled(devices.getCurrentAudioDevice() && devices.getCurrentAudioDevice()->hasControlPanel());
+#endif
         const auto setup=devices.getAudioDeviceSetup();
         auto* type=devices.getCurrentDeviceTypeObject();
         auto outputs=type ? type->getDeviceNames(false) : juce::StringArray{};
@@ -230,7 +328,12 @@ private:
         }
         fill(choices[1],rates,selectedRate);fill(choices[2],buffers,selectedBuffer);
         status.setText(error.isNotEmpty() ? error : devices.getCurrentAudioDevice() ?
-            "Virtual MIDI input: Sound Canvas Bridge. No audio input enabled." : "No audio output device is active.",juce::dontSendNotification);
+#ifdef _WIN32
+            "Audio output is active. Select MIDI inputs above. No audio input enabled."
+#else
+            "Virtual MIDI input: Sound Canvas Bridge. No audio input enabled."
+#endif
+            : "No audio output device is active.",juce::dontSendNotification);
     }
     void apply(unsigned field) {
         if(choices[field].getSelectedItemIndex()<0) return;
@@ -263,6 +366,11 @@ private:
     juce::TextButton browse;
     std::unique_ptr<juce::FileChooser> chooser;
     scbridge::TransientTooltip tips{this,700};
+#ifdef _WIN32
+    juce::Label driverLabel;
+    juce::ComboBox driver;
+    juce::TextButton panel;
+#endif
     juce::String error;
 };
 
@@ -294,8 +402,13 @@ void scheduleInitialFocus(juce::Component& root) {
                 delete this;return;
             }
             auto* peer=safe->getPeer();
-            if(safe->isShowing() && [NSApp isActive] && peer &&
-               [[(NSView*)peer->getNativeHandle() window] isKeyWindow] && focusFirstControl(*safe)) delete this;
+            if(safe->isShowing() && peer &&
+#ifdef _WIN32
+               peer->isFocused()
+#else
+               [NSApp isActive] && [[(NSView*)peer->getNativeHandle() window] isKeyWindow]
+#endif
+               && focusFirstControl(*safe)) delete this;
         }
         juce::Component::SafePointer<juce::Component> safe;
         const int generation;
@@ -306,12 +419,18 @@ void scheduleInitialFocus(juce::Component& root) {
 }
 
 void restoreControlsWindow(juce::DocumentWindow& window) {
+#ifndef _WIN32
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
     [NSApp unhide:nil];
+#endif
     window.setMinimised(false);window.setVisible(true);
+#ifndef _WIN32
     [NSApp activateIgnoringOtherApps:YES];
+#endif
     window.toFront(true);
+#ifndef _WIN32
     if(auto* peer=window.getPeer()) [[(NSView*)peer->getNativeHandle() window] makeKeyAndOrderFront:nil];
+#endif
     window.repaint();
     if(auto* content=window.getContentComponent()) {
         if(auto* tabs=dynamic_cast<juce::TabbedComponent*>(content)) content=tabs->getCurrentContentComponent();
@@ -363,36 +482,147 @@ public:
         :TabbedComponent(juce::TabbedButtonBar::TabsAtTop) {
         setName("Preferences categories");
         auto* general=new scbridge::GeneralPreferences(preferences,startup,updates);general->setComponentID("generalPreferences");
-        addTab("General",juce::Colours::lightgrey,general,true);
-        addTab("Audio and MIDI",juce::Colours::lightgrey,new AudioPreferences(manager,std::move(test),std::move(playing),std::move(changed)),true);
+        const auto background=juce::LookAndFeel::getDefaultLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId);
+        addTab("General",background,general,true);
+        addTab("Audio and MIDI",background,new AudioPreferences(manager,std::move(test),std::move(playing),std::move(changed)),true);
+        // Preferences owns one Tab loop on both platforms. Nested keyboard
+        // containers otherwise wrap within a page and make the tabs unreachable.
+        setFocusContainerType(juce::Component::FocusContainerType::focusContainer);
+        auto& bar=getTabbedButtonBar();bar.setFocusContainerType(juce::Component::FocusContainerType::focusContainer);
+        bar.setExplicitFocusOrder(1);bar.setName("Preferences categories");bar.setTitle(bar.getName());
+        for(int i=0;i<getNumTabs();++i) {
+            auto* content=getTabContentComponent(i);
+            content->setFocusContainerType(juce::Component::FocusContainerType::focusContainer);
+            content->setExplicitFocusOrder(2);
+        }
         setSize(650,670);
     }
     void currentTabChanged(int,const juce::String&) override {
         if(!getTabbedButtonBar().hasKeyboardFocus(true))
             if(auto* content=getCurrentContentComponent()) scheduleInitialFocus(*content);
     }
+protected:
+    juce::TabBarButton* createTabButton(const juce::String& name,int index) override {
+        class CategoryButton final : public juce::TabBarButton {
+        public:
+            CategoryButton(const juce::String& label,juce::TabbedButtonBar& owner):TabBarButton(label,owner) {
+                setWantsKeyboardFocus(true);setTitle(label);
+            }
+            bool keyPressed(const juce::KeyPress& key) override {
+                if(!key.getModifiers().isAnyModifierKeyDown()) {
+                    const auto code=key.getKeyCode();
+                    const int count=getTabbedButtonBar().getNumTabs();
+                    int next=getIndex();
+                    if(code==juce::KeyPress::leftKey || code==juce::KeyPress::upKey) next=(next+count-1)%count;
+                    else if(code==juce::KeyPress::rightKey || code==juce::KeyPress::downKey) next=(next+1)%count;
+                    else if(code==juce::KeyPress::homeKey) next=0;
+                    else if(code==juce::KeyPress::endKey) next=count-1;
+                    else return TabBarButton::keyPressed(key);
+                    getTabbedButtonBar().setCurrentTabIndex(next);
+                    if(auto* target=getTabbedButtonBar().getTabButton(next)) {
+                        target->grabKeyboardFocus();
+                        if(auto* handler=target->getAccessibilityHandler()) handler->grabFocus();
+                    }
+                    return true;
+                }
+                return TabBarButton::keyPressed(key);
+            }
+        };
+        auto* button=new CategoryButton(name,getTabbedButtonBar());
+        button->setExplicitFocusOrder(index+1);
+        return button;
+    }
 };
 
+#ifdef _WIN32
+class SettingsPanel final : public juce::Component {
+public:
+    SettingsPanel(juce::AudioDeviceManager& manager,scbridge::AppPreferences& preferences,scbridge::StartupService& startup,
+                  scbridge::UpdateService& updates,std::function<void()> test,std::function<bool()> playing,std::function<void()> engineChanged)
+        :tabs(manager,preferences,startup,updates,std::move(test),std::move(playing),std::move(engineChanged)) {
+        setName("Preferences");setTitle(getName());setComponentID("preferences");
+        setFocusContainerType(juce::Component::FocusContainerType::keyboardFocusContainer);
+        heading.setText("Preferences",juce::dontSendNotification);heading.setAccessible(false);
+        close.setButtonText("Close");close.setName("Close Preferences");close.setExplicitFocusOrder(2);
+        close.onClick=[this] { dismiss(true); };
+        tabs.setExplicitFocusOrder(1);
+        for(auto* child:std::initializer_list<juce::Component*>{&heading,&tabs,&close}) addAndMakeVisible(child);
+        setSize(650,714);
+    }
+    std::function<void()> onClose;
+    void dismiss(bool restoreFocus) {
+        setVisible(false);
+        if(restoreFocus && onClose) onClose();
+    }
+    void selectAudioTab() { tabs.setCurrentTabIndex(1); }
+    void focusInitialControl() {
+        if(auto* content=tabs.getCurrentContentComponent()) scheduleInitialFocus(*content);
+    }
+    void resized() override {
+        heading.setBounds(12,8,getWidth()-152,28);close.setBounds(getWidth()-132,6,120,32);
+        tabs.setBounds(0,44,getWidth(),std::max(0,getHeight()-44));
+    }
+    void paint(juce::Graphics& graphics) override {
+        graphics.fillAll(getLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId));
+    }
+    bool keyPressed(const juce::KeyPress& key) override {
+        if(key==juce::KeyPress::escapeKey) { dismiss(true);return true; }
+        return false;
+    }
+private:
+    PreferenceTabs tabs;
+    juce::Label heading;
+    juce::TextButton close;
+};
+#else
 class SettingsWindow final : public juce::DocumentWindow {
 public:
     SettingsWindow(juce::AudioDeviceManager& manager,scbridge::AppPreferences& preferences,scbridge::StartupService& startup,
-                   scbridge::UpdateService& updates,std::function<void()> test,std::function<bool()> playing,std::function<void()> engineChanged)
-        :DocumentWindow("Preferences",juce::Colours::darkgrey,closeButton) {
+                   scbridge::UpdateService& updates,std::function<void()> test,std::function<bool()> playing,std::function<void()> engineChanged,
+                   juce::DocumentWindow* owner=nullptr)
+        :DocumentWindow("Preferences",juce::Colours::darkgrey,closeButton,
+#ifdef _WIN32
+            false
+#else
+            true
+#endif
+        ) {
         setUsingNativeTitleBar(true);setContentOwned(new PreferenceTabs(manager,preferences,startup,updates,std::move(test),std::move(playing),std::move(engineChanged)),true);
+#ifdef _WIN32
+        addToDesktop(getDesktopWindowStyleFlags());
+        if(owner && owner->getPeer())
+            SetWindowLongPtrW(static_cast<HWND>(getPeer()->getNativeHandle()),GWLP_HWNDPARENT,
+                reinterpret_cast<LONG_PTR>(owner->getPeer()->getNativeHandle()));
+#endif
         centreWithSize(getWidth(),getHeight());restoreControlsWindow(*this);
     }
-    void closeButtonPressed() override { setVisible(false); }
+    std::function<void()> onClose;
+    void dismiss(bool restoreFocus) {
+#ifdef _WIN32
+        if(isCurrentlyModal()) exitModalState(0);
+#endif
+        setVisible(false);
+        if(restoreFocus && onClose) onClose();
+    }
+    void closeButtonPressed() override { dismiss(true); }
     bool keyPressed(const juce::KeyPress& key) override {
-        if(key==juce::KeyPress::escapeKey) { setVisible(false);return true; }
+        if(key==juce::KeyPress::escapeKey) { closeButtonPressed();return true; }
         return DocumentWindow::keyPressed(key);
     }
 };
+#endif
 
 class MainContent final : public juce::Component {
 public:
-    MainContent(juce::AudioProcessor& processor,scbridge::MidiActivity& activity,bool visible)
+    MainContent(juce::AudioProcessor& processor,scbridge::MidiActivity& activity,bool visible,std::function<void(int)> applyMap={})
         :editor(processor.createEditorAndMakeActive()),display(activity) {
-        setName("Sound Canvas controls");addAndMakeVisible(*editor);addChildComponent(display);showActivity(visible);
+        setName("Sound Canvas controls");
+        if(applyMap) scbridge::configureStandaloneEditor(*editor,std::move(applyMap));
+        setFocusContainerType(juce::Component::FocusContainerType::keyboardFocusContainer);
+        addAndMakeVisible(*editor);addChildComponent(display);showActivity(visible);
+    }
+    ~MainContent() override {
+        if(editor) editor->getAudioProcessor()->editorBeingDeleted(editor.get());
     }
     void showActivity(bool visible) {
         display.setVisible(visible);setSize(editor->getWidth()+(visible ? 212 : 0),editor->getHeight());
@@ -408,18 +638,71 @@ private:
 
 class MainWindow final : public juce::DocumentWindow {
 public:
-    MainWindow(juce::AudioProcessor& processor,scbridge::MidiActivity& activity,bool showActivity,bool initiallyVisible=true)
-        :DocumentWindow("Sound Canvas Bridge",juce::Colours::black,allButtons) {
+    MainWindow(juce::AudioProcessor& processor,scbridge::MidiActivity& activity,bool showActivity,bool initiallyVisible=true,std::function<void(int)> mapAll={})
+        :DocumentWindow("Sound Canvas Bridge",juce::Colours::black,allButtons),applyMap(std::move(mapAll)) {
         setUsingNativeTitleBar(true);setEditor(processor,activity,showActivity);
         centreWithSize(getWidth(),getHeight());setVisible(initiallyVisible);
     }
     void setEditor(juce::AudioProcessor& processor,scbridge::MidiActivity& activity,bool visible) {
-        setContentOwned(new MainContent(processor,activity,visible),true);
+        setContentOwned(new MainContent(processor,activity,visible,applyMap),true);
         scheduleInitialFocus(*getContentComponent());
     }
     void showActivity(bool visible) { if(auto* content=dynamic_cast<MainContent*>(getContentComponent())) content->showActivity(visible); }
+#ifdef _WIN32
+    void showPreferences(SettingsPanel& panel) {
+        if(!preferences || !preferences->isVisible()) {
+            auto* focused=juce::Component::getCurrentlyFocusedComponent();
+            if(focused && getContentComponent()->isParentOf(focused)) previousFocus=focused;
+        }
+        preferences=&panel;
+        getContentComponent()->setVisible(false);
+        addAndMakeVisible(panel);panel.setBounds(getContentComponent()->getBounds());panel.toFront(false);
+        toFront(true);panel.focusInitialControl();
+    }
+    void dismissPreferences() {
+        if(preferences) preferences->setVisible(false);
+        getContentComponent()->setVisible(true);
+        if(previousFocus && previousFocus->isShowing() && previousFocus->isEnabled()) {
+            previousFocus->grabKeyboardFocus();
+            if(auto* handler=previousFocus->getAccessibilityHandler()) handler->grabFocus();
+        } else scheduleInitialFocus(*getContentComponent());
+        previousFocus=nullptr;
+    }
+    bool preferencesVisible() const { return preferences && preferences->isVisible(); }
+    void resized() override {
+        DocumentWindow::resized();
+        if(preferences && getContentComponent()) preferences->setBounds(getContentComponent()->getBounds());
+    }
+#endif
+    void activeWindowStatusChanged() override {
+        DocumentWindow::activeWindowStatusChanged();
+        if(isActiveWindow()) if(auto* content=focusRoot())
+            if(!content->hasKeyboardFocus(true)) scheduleInitialFocus(*content);
+    }
+    bool keyPressed(const juce::KeyPress& key) override {
+        if(key.getKeyCode()==juce::KeyPress::tabKey && !key.getModifiers().isCtrlDown() &&
+           !key.getModifiers().isAltDown() && !key.getModifiers().isCommandDown()) {
+            if(auto* content=focusRoot()) if(!content->hasKeyboardFocus(true)) {
+                if(!focusFirstControl(*content)) scheduleInitialFocus(*content);
+                return true;
+            }
+        }
+        return DocumentWindow::keyPressed(key);
+    }
     std::function<void()> onClose;
     void closeButtonPressed() override { if(onClose) onClose();else setVisible(false); }
+private:
+    std::function<void(int)> applyMap;
+    juce::Component* focusRoot() {
+#ifdef _WIN32
+        if(preferencesVisible()) return preferences;
+#endif
+        return getContentComponent();
+    }
+#ifdef _WIN32
+    juce::Component::SafePointer<SettingsPanel> preferences;
+    juce::Component::SafePointer<juce::Component> previousFocus;
+#endif
 };
 
 class Standalone final : public juce::JUCEApplication,private juce::MenuBarModel,private juce::ChangeListener {
@@ -427,14 +710,18 @@ public:
     const juce::String getApplicationName() override { return "Sound Canvas Bridge"; }
     const juce::String getApplicationVersion() override { return appVersion(); }
     bool moreThanOneInstanceAllowed() override { return false; }
-    void initialise(const juce::String&) override {
+    void initialise(const juce::String& commandLine) override {
         juce::LookAndFeel::getDefaultLookAndFeel().setUsingNativeAlertWindows(true);
         auto directory=applicationData();
         if(!directory.createDirectory().wasOk()) {
             juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Sound Canvas Bridge","Could not create the application settings folder.");
             quit();return;
         }
+#ifdef _WIN32
+        logger=std::make_unique<juce::FileLogger>(directory.getChildFile("Standalone.log"),"Standalone started",262144);
+#else
         logger.reset(juce::FileLogger::createDefaultAppLogger("OnjMusic/SoundCanvasBridge","Standalone.log","Standalone started",262144));
+#endif
         juce::Logger::setCurrentLogger(logger.get());
         processor.reset(createPluginFilter());
         auto session=directory.getChildFile("Standalone.state");
@@ -442,21 +729,60 @@ public:
             juce::MemoryBlock state;session.loadFileAsData(state);
             processor->setStateInformation(state.getData(),static_cast<int>(state.getSize()));
         }
-        auto audio=juce::XmlDocument::parse(directory.getChildFile("Audio.xml"));
-        juce::AudioDeviceManager::AudioDeviceSetup preferred;preferred.bufferSize=128;
-        const auto error=devices.initialise(0,2,audio.get(),true,{},&preferred);
-        if(error.isNotEmpty()) juce::Logger::writeToLog("Audio initialisation: "+error);
+        const auto audioFile=directory.getChildFile("Audio.xml");
+        auto audio=juce::XmlDocument::parse(audioFile);
+        const auto error=audioFile.existsAsFile() && (!audio || !audio->hasTagName("DEVICESETUP"))
+            ? juce::String("The saved audio settings could not be read. Choose an output in Preferences; the saved file has not been overwritten.")
+            : scbridge::initialiseStandaloneAudio(devices,audio.get());
+        juce::Logger::writeToLog("Audio settings: "+audioFile.getFullPathName());
+        if(audio) juce::Logger::writeToLog("Requested audio: "+audio->getStringAttribute("deviceType")+" / "+audio->getStringAttribute("audioOutputDeviceName")+
+            "; rate "+audio->getStringAttribute("audioDeviceRate")+"; buffer "+audio->getStringAttribute("audioDeviceBufferSize"));
+        if(error.isNotEmpty()) juce::Logger::writeToLog("Audio initialisation failed; saved output retained: "+error);
+        else if(auto* device=devices.getCurrentAudioDevice()) juce::Logger::writeToLog("Active audio: "+devices.getCurrentAudioDeviceType()+" / "+device->getName()+
+            "; rate "+juce::String(device->getCurrentSampleRate())+"; buffer "+juce::String(device->getCurrentBufferSizeSamples()));
         output=std::make_unique<scbridge::PersistentEngineOutput>(*processor,midiCollector);
         devices.addAudioCallback(output.get());
         devices.addMidiInputDeviceCallback({},&midiInput);
-        virtualInput=juce::MidiInput::createNewDevice(virtualPortName,&midiInput);
+        const auto arguments=juce::StringArray::fromTokens(commandLine,true);
+        const bool requestVirtualMidi=!arguments.contains("--no-virtual-midi")
+#ifdef _WIN32
+            && arguments.contains("--experimental-native-midi")
+#endif
+            ;
+        // Current Windows builds can deadlock the MIDI service during virtual
+        // device teardown (Microsoft/MIDI #1047). Never opt users in silently.
+        if(requestVirtualMidi)
+            virtualInput=scbridge::VirtualMidiInput::createNewDevice(virtualPortName,&midiInput);
         if(virtualInput) { virtualInput->start();juce::Logger::writeToLog("Virtual MIDI input ready"); }
-        else juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"MIDI input","Could not create the Sound Canvas Bridge virtual MIDI input.");
+        else if(requestVirtualMidi)
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"MIDI input","Could not create the Sound Canvas Bridge virtual MIDI input. Physical MIDI inputs and audio remain available.");
+#ifdef _WIN32
+        else juce::Logger::writeToLog("Native virtual MIDI disabled; system MIDI inputs remain available.");
+#endif
         if(auto ui=juce::XmlDocument::parse(directory.getChildFile("Interface.xml"))) showActivity=ui->getBoolAttribute("activity",true);
-        const bool hiddenStart=appPreferences.startHidden();
+        const bool hiddenStart=appPreferences.startHidden() && !arguments.contains("--show-controls");
+        juce::Logger::writeToLog("Start hidden: "+juce::String(appPreferences.startHidden() ? "enabled" : "disabled")+
+            "; explicit Show Controls: "+juce::String(arguments.contains("--show-controls") ? "yes" : "no"));
+#ifndef _WIN32
         if(hiddenStart) [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
-        window=std::make_unique<MainWindow>(*processor,activity,showActivity,!hiddenStart);
-        window->onClose=[this] { hideControls(); };
+#endif
+        window=std::make_unique<MainWindow>(*processor,activity,showActivity,!hiddenStart,[this](int map) {
+            std::array<scbridge::ControlMessage,32> messages;
+            if(!scbridge::standaloneMapSelection(*processor,map,messages)) {
+                juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Sound map","The engine is not ready. Wait for playback to become available, then select the map again.");
+                return;
+            }
+            for(const auto& message:messages)
+                if(message.size) sendMidi(juce::MidiMessage(message.bytes.data(),static_cast<int>(message.size)));
+            juce::Logger::writeToLog("Sound map applied to all parts: "+juce::String(map));
+        });
+        window->onClose=[this] {
+#ifdef _WIN32
+            systemRequestedQuit();
+#else
+            hideControls();
+#endif
+        };
         if(!hiddenStart) { window->toFront(true);scheduleInitialFocus(*window->getContentComponent()); }
         commands.registerAllCommandsForTarget(this);commands.setFirstCommandTarget(this);
         window->addKeyListener(commands.getKeyMappings());
@@ -464,21 +790,35 @@ public:
             showControlsCommand,audioSettingsCommand,panicCommand,juce::StandardApplicationCommandIDs::quit,true);
         applicationExtras.addCommandItem(&commands,updatesCommand);applicationExtras.addCommandItem(&commands,donateCommand);
         applicationExtras.addCommandItem(&commands,projectCommand);
+#ifdef _WIN32
+        nativeMenu=std::make_unique<scbridge::WindowsMenuBar>(*window,commands,
+            std::vector<scbridge::WindowsMenuBar::Section>{
+                {"&File",{audioSettingsCommand,0,juce::StandardApplicationCommandIDs::quit},{"&Preferences...",{},"E&xit"}},
+                windowsMidiMenu(),
+                {"&View",{showControlsCommand,hideControlsCommand,0,activityDisplayCommand,readActivityCommand}},
+                {"&Help",{historyCommand,contextHelpCommand,manualCommand,projectCommand,0,updatesCommand,contactCommand,donateCommand,aboutCommand}}});
+#else
         juce::MenuBarModel::setMacMainMenu(this,&applicationExtras);
+#endif
         devices.addChangeListener(this);
-        saveAudioSettings();
+        if(error.isEmpty()) saveAudioSettings();
         const bool engineReady=scbridge::EngineLocation().available();
         if(scbridge::AppPreferences::shouldHide(hiddenStart,statusItem->available(),engineReady,error.isEmpty() && devices.getCurrentAudioDevice()!=nullptr)) {
             hideControls();
         } else {
             if(hiddenStart) showControls();
-            if(error.isNotEmpty() || !engineReady || devices.getCurrentAudioDevice()==nullptr) showSettings(true);
+            if(error.isNotEmpty() || !engineReady || devices.getCurrentAudioDevice()==nullptr) showSettings(true,error);
         }
         updates.start();
     }
     void shutdown() override {
         updates.stop();
-        devices.removeChangeListener(this);juce::MenuBarModel::setMacMainMenu(nullptr);
+        devices.removeChangeListener(this);
+#ifdef _WIN32
+        nativeMenu.reset();
+#else
+        juce::MenuBarModel::setMacMainMenu(nullptr);
+#endif
         statusItem.reset();helpWindow.reset();settings.reset();window.reset();
         testPhrase.stop();devices.removeMidiInputDeviceCallback({},&midiInput);
         if(virtualInput) { virtualInput->stop();virtualInput.reset(); }
@@ -558,6 +898,12 @@ private:
     void menuItemSelected(int,int) override {}
     void showControls() {
         if(statusItem) statusItem->setControlsHidden(false);
+#ifdef _WIN32
+        if(window && (window->preferencesVisible() || !window->getContentComponent()->isVisible())) {
+            if(settings) settings->dismiss(false);
+            window->dismissPreferences();
+        }
+#endif
         if(window) restoreControlsWindow(*window);
         juce::Logger::writeToLog("Controls restored");
     }
@@ -566,25 +912,52 @@ private:
             juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Menu-bar status item","The menu-bar item is unavailable, so the controls will stay visible.");return;
         }
         if(helpWindow) helpWindow->setVisible(false);
-        if(settings) settings->setVisible(false);
+        if(settings) settings->dismiss(false);
         statusItem->setControlsHidden(true);
         if(window) window->setVisible(false);
+#ifndef _WIN32
         [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+#endif
         juce::Logger::writeToLog("Controls hidden to menu bar; audio continues");
     }
-    void showSettings(bool audioRecovery=false) {
+    void showSettings(bool audioRecovery=false,const juce::String& audioError={}) {
         if(statusItem) statusItem->setControlsHidden(false);
+#ifndef _WIN32
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+#endif
         if(!settings) {
+#ifdef _WIN32
+            settings=std::make_unique<SettingsPanel>(devices,appPreferences,startup,updates,[this] {
+#else
             settings=std::make_unique<SettingsWindow>(devices,appPreferences,startup,updates,[this] {
+#endif
                 if(testPhrase.isPlaying()) testPhrase.stop();
                 else if(!testPhrase.start()) juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Test phrase","Choose an active audio output first.");
-            },[this] { return testPhrase.isPlaying(); },[this] { confirmReset(restartEngineCommand); });
+            },[this] { return testPhrase.isPlaying(); },[this] { confirmReset(restartEngineCommand); }
+#ifndef _WIN32
+            ,window.get()
+#endif
+            );
+#ifdef _WIN32
+            settings->onClose=[this] { window->dismissPreferences(); };
+#else
+            settings->onClose=[this] { showControls(); };
+#endif
             settings->addKeyListener(commands.getKeyMappings());
         }
+#ifdef _WIN32
+        if(audioRecovery) settings->selectAudioTab();
+        if(window) {
+            if(statusItem) statusItem->setControlsHidden(false);
+            restoreControlsWindow(*window);window->showPreferences(*settings);
+        }
+#else
         if(audioRecovery)
             if(auto* tabs=dynamic_cast<PreferenceTabs*>(settings->getContentComponent())) tabs->setCurrentTabIndex(1);
         restoreControlsWindow(*settings);
+#endif
+        if(audioError.isNotEmpty()) juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Audio output unavailable",
+            audioError+"\n\nThe saved audio output has been retained; no replacement interface was selected. Choose an available output in Audio/MIDI Preferences.");
     }
     void sendMidi(juce::MidiMessage message) {
         message.setTimeStamp(juce::Time::getMillisecondCounterHiRes()*0.001);
@@ -628,22 +1001,35 @@ private:
         if(!applicationData().getChildFile("Standalone.state").replaceWithData(defaults.getData(),defaults.getSize()))
             juce::Logger::writeToLog("Could not save reset standalone settings");
         juce::Logger::writeToLog("Fresh engine restart completed; audio configuration retained");
+#ifndef _WIN32
         juce::AccessibilityHandler::postAnnouncement("Engine restarted with default settings",juce::AccessibilityHandler::AnnouncementPriority::medium);
+#endif
     }
     static void openLink(const juce::String& url) {
         if(!juce::URL(url).launchInDefaultBrowser())
             juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Open link","The browser could not open this link: "+url);
     }
     static void openResource(const juce::String& name) {
-        auto file=juce::File::getSpecialLocation(juce::File::currentApplicationFile).getChildFile("Contents/Resources").getChildFile(name);
+        auto file=juce::File::getSpecialLocation(juce::File::currentApplicationFile)
+#ifdef _WIN32
+            .getParentDirectory()
+#else
+            .getChildFile("Contents/Resources")
+#endif
+            .getChildFile(name);
         if(!file.existsAsFile() || !file.startAsProcess())
             juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Help","The bundled document could not be opened.");
     }
     void showControlHelp() {
         auto* focused=juce::Component::getCurrentlyFocusedComponent();
-        while(focused && focused->getHelpText().isEmpty()) focused=focused->getParentComponent();
+        while(focused && scbridge::contextHelp(*focused).isEmpty()) focused=focused->getParentComponent();
         const auto title=focused ? focused->getName() : "Sound Canvas Bridge";
-        const auto help=focused ? focused->getHelpText() : "Open Preferences with Command+comma or Command+Shift+U. The Help menu contains the full manual.";
+        const auto help=focused ? scbridge::contextHelp(*focused) :
+#ifdef _WIN32
+            "Open Preferences with Ctrl+comma. The Help menu contains the full manual.";
+#else
+            "Open Preferences with Command+comma. The Help menu contains the full manual.";
+#endif
         helpWindow=std::make_unique<ControlHelpWindow>(title,help,focused);
     }
     void saveAudioSettings() {
@@ -665,13 +1051,20 @@ private:
     scbridge::MidiActivity activity;
     scbridge::ActivityMidiInput midiInput{midiCollector,activity};
     std::unique_ptr<juce::AudioProcessor> processor;
-    std::unique_ptr<juce::MidiInput> virtualInput;
+    std::unique_ptr<scbridge::VirtualMidiInput> virtualInput;
     std::unique_ptr<MainWindow> window;
+#ifdef _WIN32
+    std::unique_ptr<SettingsPanel> settings;
+#else
     std::unique_ptr<SettingsWindow> settings;
+#endif
     std::unique_ptr<ControlHelpWindow> helpWindow;
     std::unique_ptr<scbridge::MenuBarStatus> statusItem;
     juce::ApplicationCommandManager commands;
     juce::PopupMenu applicationExtras;
+#ifdef _WIN32
+    std::unique_ptr<scbridge::WindowsMenuBar> nativeMenu;
+#endif
     std::unique_ptr<juce::FileLogger> logger;
     juce::String lastAudioXml;
     bool showActivity=true;

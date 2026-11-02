@@ -4,12 +4,15 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <thread>
+#ifndef _WIN32
 #include <mach/mach.h>
 #include <mach/semaphore.h>
 #include <mach/sync_policy.h>
 #include <mach/mach_time.h>
 #include <pthread.h>
+#endif
 #include <algorithm>
 
 namespace scbridge {
@@ -25,6 +28,25 @@ constexpr int workerIdleWaitMilliseconds = 100;
 // No mutex, allocation, file access or socket operation runs in notify().
 class WakeSignal {
 public:
+#ifdef _WIN32
+    WakeSignal() : event(CreateEventW(nullptr,FALSE,FALSE,nullptr)) {}
+    ~WakeSignal() { if(event) CloseHandle(event); }
+    WakeSignal(const WakeSignal&) = delete;
+    WakeSignal& operator=(const WakeSignal&) = delete;
+    bool valid() const { return event!=nullptr; }
+    void notify() { if(event && !pending.exchange(true,std::memory_order_acq_rel)) SetEvent(event); }
+    bool waitUntil(std::chrono::steady_clock::time_point deadline) {
+        const auto remaining=std::chrono::duration<double,std::milli>(deadline-std::chrono::steady_clock::now()).count();
+        if(!event || remaining<=0) return false;
+        const auto timeout=static_cast<DWORD>(std::min(2147483647.0,std::ceil(remaining)));
+        if(WaitForSingleObject(event,timeout)!=WAIT_OBJECT_0) return false;
+        pending.store(false,std::memory_order_release);return true;
+    }
+    void reset() { if(event) ResetEvent(event);pending.store(false,std::memory_order_release); }
+private:
+    HANDLE event=nullptr;
+    std::atomic<bool> pending{false};
+#else
     WakeSignal() { semaphore_create(mach_task_self(), &semaphore, SYNC_POLICY_FIFO, 0); }
     ~WakeSignal() { if (valid()) semaphore_destroy(mach_task_self(), semaphore); }
     WakeSignal(const WakeSignal&) = delete;
@@ -53,6 +75,7 @@ public:
 private:
     semaphore_t semaphore = SEMAPHORE_NULL;
     std::atomic<bool> pending{false};
+#endif
 };
 
 // One producer and one consumer own each queue. Payloads are published only

@@ -1,4 +1,5 @@
 #include "ControllerMirror.h"
+#include "StandaloneControls.h"
 #include <iostream>
 #include <stdexcept>
 #include <vector>
@@ -8,6 +9,25 @@ static void require(bool condition,const char* message) {
 }
 int main() {
     scbridge::ControllerMirror mirror;
+    for(int map=1;map<=4;++map) {
+        scbridge::ControllerMirror all;
+        for(unsigned part=0;part<16;++part) {
+            all.observeShort((0xb0|part)|(0<<8)|((part+2)<<16));
+            all.observeShort((0xc0|part)|((part+7)<<8));
+        }
+        scbridge::EngineScene before;all.capture(before);
+        const auto messages=scbridge::allPartMapSelection(map,before);
+        require(messages.size()==32,"All-parts map must include native tone reselection");
+        for(const auto& message:messages) all.observeLong(message.bytes.data(),message.size);
+        for(unsigned part=0;part<16;++part) {
+            int32_t pending[scbridge::parameterCount]{},actual[scbridge::parameterCount]{};
+            pending[0]=part;all.snapshot(part,pending,actual);
+            require(actual[1]==map && actual[2]==int(part+2) && actual[3]==int(part+7),
+                "All-parts map must cover each GS part block without changing bank/program");
+        }
+    }
+    for(const auto& message:scbridge::allPartMapMessages(0)) require(message.size==0,"Invalid map must not generate MIDI");
+    for(const auto& message:scbridge::allPartMapSelection(5,{})) require(message.size==0,"Invalid map must not reselect tones");
     int32_t commands[scbridge::parameterCount]{},values[scbridge::parameterCount]{};
     auto cc=[&](unsigned part,unsigned controller,unsigned value) {
         mirror.observeShort((0xb0|part)|(controller<<8)|(value<<16));

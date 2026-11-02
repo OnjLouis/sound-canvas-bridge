@@ -1,5 +1,35 @@
 #pragma once
 #include <juce_audio_utils/juce_audio_utils.h>
+#ifdef _WIN32
+namespace scbridge {
+class MenuBarStatus final : public juce::SystemTrayIconComponent {
+public:
+    MenuBarStatus(std::function<void(int)> action,int show,int settings,int panic,int quit,bool=false)
+        :invoke(std::move(action)),showCommand(show) {
+        setName("Sound Canvas Bridge");setTitle(getName());
+        juce::Image image(juce::Image::ARGB,32,32,true);juce::Graphics graphics(image);
+        graphics.setColour(juce::Colours::teal);graphics.fillRoundedRectangle(1,1,30,30,5);
+        graphics.setColour(juce::Colours::white);
+        graphics.fillRect(7,13,4,12);graphics.fillRect(14,6,4,19);graphics.fillRect(21,10,4,15);
+        setIconImage(image,image);
+        setIconTooltip(getName());
+        menu.addItem(show,"Show Controls");menu.addItem(settings,"Preferences...");menu.addSeparator();
+        menu.addItem(panic,"Panic: All Sounds Off");menu.addSeparator();menu.addItem(quit,"Exit Sound Canvas Bridge");
+    }
+    bool available() const { return getNativeHandle()!=nullptr; }
+    void setControlsHidden(bool) {}
+    void mouseDown(const juce::MouseEvent& event) override {
+        if(!event.mods.isPopupMenu()) { if(invoke) invoke(showCommand);return; }
+        menu.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(this),
+            [safe=juce::Component::SafePointer<MenuBarStatus>(this)](int result) { if(safe && result && safe->invoke) safe->invoke(result); });
+    }
+private:
+    std::function<void(int)> invoke;
+    int showCommand;
+    juce::PopupMenu menu;
+};
+}
+#else
 #import <AppKit/AppKit.h>
 
 @interface OnjSCBridgeMenuTarget : NSObject <NSApplicationDelegate> {
@@ -81,3 +111,4 @@ private:
     const bool handlesReopen;
 };
 }
+#endif

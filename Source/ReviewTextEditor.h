@@ -28,7 +28,13 @@ class ReviewTextEditor final : public juce::TextEditor {
 public:
     ReviewTextEditor() {
         setMultiLine(true);setReadOnly(true);setCaretVisible(true);setTabKeyUsedAsCharacter(false);
-        setHelpText("Read-only help text. Use arrow keys to review, Shift with arrows to select, and Command+C to copy. Escape closes help.");
+        setHelpText("Read-only help text. Use arrow keys to review, Shift with arrows to select, and "
+#ifdef _WIN32
+            "Ctrl+C"
+#else
+            "Command+C"
+#endif
+            " to copy. Escape closes help.");
         setTooltip(getHelpText());
     }
     bool keyPressed(const juce::KeyPress& key) override {

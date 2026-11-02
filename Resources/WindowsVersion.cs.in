@@ -1,0 +1,7 @@
+using System.Reflection;
+[assembly: AssemblyTitle("Sound Canvas Bridge Maintenance")]
+[assembly: AssemblyCompany("OnjMusic")]
+[assembly: AssemblyProduct("Sound Canvas Bridge")]
+[assembly: AssemblyVersion("@PROJECT_VERSION@.0")]
+[assembly: AssemblyFileVersion("@PROJECT_VERSION@.0")]
+[assembly: AssemblyInformationalVersion("@PROJECT_VERSION@")]

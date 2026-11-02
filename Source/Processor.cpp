@@ -5,6 +5,11 @@
 #include "EngineLocation.h"
 #include "TransientTooltip.h"
 #include "NumericSlider.h"
+#include "StandaloneEditor.h"
+#include "ControlHelp.h"
+#ifdef _WIN32
+#include "WindowsIpc.h"
+#else
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
@@ -17,6 +22,7 @@
 #include <cerrno>
 #include <CoreFoundation/CoreFoundation.h>
 extern char** environ;
+#endif
 
 namespace {
 void moduleAnchor() {}
@@ -78,12 +84,12 @@ juce::String controlHelp(unsigned index) {
     return help;
 }
 
-class BridgeEditor final : public juce::AudioProcessorEditor, private juce::Timer {
+class BridgeEditor final : public juce::AudioProcessorEditor, private juce::Timer, private juce::KeyListener {
 public:
     BridgeEditor(juce::AudioProcessor& p, juce::AudioProcessorValueTreeState& state,
                  std::function<juce::String()> statusText, std::function<int()> latencyValue,
                  std::function<void(int)> changeLatency, std::function<bool()> advancedValue)
-        : AudioProcessorEditor(p), readStatus(std::move(statusText)), readLatency(std::move(latencyValue)),
+        : AudioProcessorEditor(p), parameters(state), readStatus(std::move(statusText)), readLatency(std::move(latencyValue)),
           readAdvanced(std::move(advancedValue)) {
         setName("Sound Canvas controls"); setTitle("Sound Canvas controls");
         tooltips.setComponentID("controlHelp");
@@ -111,6 +117,11 @@ public:
                 choiceAttachments[i] = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(state, ids[i], choice);
             } else {
                 auto& slider = sliders[i]; slider.setTooltip(help);
+#ifdef _WIN32
+                const auto unit=scbridge::controls[i].unit;
+                slider.setAccessibilityValueOffset(i==0 || i==3 ? 1 : unit==scbridge::ControlUnit::Signed64 ? -64 :
+                    unit==scbridge::ControlUnit::DrumPitch ? -60 : 0);
+#endif
                 slider.setSliderStyle(juce::Slider::LinearHorizontal);
                 slider.configureValueField(i<scbridge::legacyParameterCount ? 116 : 200);
                 auto* parameter = state.getParameter(ids[i]);
@@ -130,7 +141,13 @@ public:
         addAndMakeVisible(pageLabel);
         status.setComponentID("engineStatus"); status.setName("Engine status"); status.setTitle("Engine status");
         latency.setComponentID("bridgeLatency"); latency.setName("Bridge latency"); latency.setTitle("Bridge latency");
-        auto help = "Default bridge latency shared by the standalone app and AU/VST3 plug-ins. Lower values need more scheduling headroom. Changing tracks or host block sizes does not change this delay. Adjust while stopped to avoid a brief gap. Arrow keys change 32 samples; Page Up and Page Down change 320; Home and End select the limits. Enter opens direct value entry; Enter confirms and Escape cancels.";
+        auto help = "Default bridge latency shared by the standalone app and "
+#ifdef _WIN32
+            "VST3 plug-in. "
+#else
+            "AU/VST3 plug-ins. "
+#endif
+            "Lower values need more scheduling headroom. Changing tracks or host block sizes does not change this delay. Adjust while stopped to avoid a brief gap. Arrow keys change 32 samples; Page Up and Page Down change 320; Home and End select the limits. Enter opens direct value entry; Enter confirms and Escape cancels.";
         latency.setDescription(latency.getName()); latency.setHelpText(help); latency.setTooltip(help);
         latency.setWantsKeyboardFocus(true); latency.setExplicitFocusOrder(100);
         latency.setSliderStyle(juce::Slider::LinearHorizontal);
@@ -149,6 +166,49 @@ public:
         showPage(); timerCallback(); startTimerHz(2);
     }
     ~BridgeEditor() override { stopTimer(); setVisible(false); }
+    void configureStandalone(std::function<void(int)> applyMap) {
+        if(mapAll) return;
+        mapAll=std::move(applyMap);
+        choices[1].addKeyListener(this);
+        sliders[0].setComponentID("selectedPartParameter");
+        partScope.setComponentID("part");partScope.setName("Part");partScope.setTitle("Part");
+        partScope.setDescription("Part");
+        partScope.getProperties().set(scbridge::explicitHelpProperty,"Select a part from 1 to 16, or All to apply the next Sound Map choice to every part. All does not broadcast other controls; part-specific controls are unavailable until you select a numbered part. Incoming MIDI keeps its own routing.");
+        partScope.setWantsKeyboardFocus(true);
+        partScope.addItem("All (Sound Map)",1);
+        for(int part=1;part<=16;++part) partScope.addItem(juce::String(part),part+1);
+        partScope.setSelectedId(static_cast<int>(sliders[0].getValue())+2,juce::dontSendNotification);
+        partScope.onChange=[this] {
+            const bool all=partScope.getSelectedId()==1;
+            if(all==allParts && all) return;
+            allParts=all;
+            if(all) {
+                lastRequestedMap=0;
+                choiceAttachments[1].reset();
+                choices[1].setTextWhenNothingSelected("Choose map for all parts");
+                choices[1].setSelectedId(0,juce::dontSendNotification);
+                choices[1].setText({},juce::dontSendNotification);
+                choices[1].onChange=[this] {
+                    const int map=choices[1].getSelectedId();
+                    if(!allParts || map<=0) return;
+                    lastRequestedMap=map;
+                    const auto name=choices[1].getItemText(map-1);
+                    mapAll(map);
+                    // Leave the menu unselected so the same map can be requested again after external MIDI.
+                    choices[1].setText("Last requested: "+name,juce::dontSendNotification);
+                };
+            } else {
+                choices[1].onChange=nullptr;
+                auto* part=parameters.getParameter(ids[0]);part->beginChangeGesture();
+                part->setValueNotifyingHost(part->convertTo0to1(static_cast<float>(partScope.getSelectedId()-2)));part->endChangeGesture();
+                choiceAttachments[1]=std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(parameters,ids[1],choices[1]);
+            }
+            updateEnabledControls();
+        };
+        choices[1].setHelpText("With a numbered part selected, changes that part's map. With All selected, applies the chosen map to all 16 parts without changing their bank, program, mixer or effects. This is the last requested map; subsequent MIDI can override individual parts.");
+        choices[1].setTooltip(choices[1].getHelpText());
+        sliders[0].setVisible(false);addAndMakeVisible(partScope);showPage();
+    }
     void resized() override {
         pageLabel.setBounds(12,10,200,30);page.setBounds(214,10,getWidth()-226,30);
         const int rowHeight=std::min(36,(getHeight()-180)/16);
@@ -162,7 +222,24 @@ public:
         status.setBounds(12, getHeight()-92, getWidth() - 24, 80);
     }
 private:
+    bool keyPressed(const juce::KeyPress& key,juce::Component* origin) override {
+        if(!allParts || origin!=&choices[1] || !choices[1].isEnabled() || choices[1].isPopupActive() ||
+           key.getModifiers().isAnyModifierKeyDown()) return false;
+        const int count=choices[1].getNumItems(),code=key.getKeyCode();
+        if(!count) return false;
+        int next=lastRequestedMap;
+        if(code==juce::KeyPress::downKey || code==juce::KeyPress::rightKey) next=next ? std::min(count,next+1) : 1;
+        else if(code==juce::KeyPress::upKey || code==juce::KeyPress::leftKey) next=next ? std::max(1,next-1) : count;
+        else if(code==juce::KeyPress::homeKey) next=1;
+        else if(code==juce::KeyPress::endKey) next=count;
+        else return false;
+        // The request-only display deliberately has no selected menu item, so
+        // remember its position separately instead of nudging ComboBox's zero ID.
+        if(next!=lastRequestedMap) choices[1].setSelectedId(next,juce::sendNotificationSync);
+        return true;
+    }
     juce::Component& controlAt(unsigned i) {
+        if(i==0 && mapAll) return partScope;
         if(scbridge::controls[i].unit==scbridge::ControlUnit::Switch) return toggles[i];
         if(choiceControl(i)) return choices[i];
         return sliders[i];
@@ -184,8 +261,8 @@ private:
         resized();
     }
     void timerCallback() override {
-        for(unsigned i=scbridge::legacyParameterCount;i<scbridge::parameterCount;++i)
-            controlAt(i).setEnabled(readAdvanced());
+        updateEnabledControls();
+        if(mapAll && !allParts) partScope.setSelectedId(static_cast<int>(sliders[0].getValue())+2,juce::dontSendNotification);
         auto* focus = juce::Component::getCurrentlyFocusedComponent();
         if (!latency.isMouseButtonDown() && !(focus && latency.isParentOf(focus)))
             latency.setValue(readLatency(), juce::dontSendNotification);
@@ -195,6 +272,18 @@ private:
         if (auto* handler = status.getAccessibilityHandler())
             handler->notifyAccessibilityEvent(juce::AccessibilityEvent::valueChanged);
     }
+    void updateEnabledControls() {
+        for(unsigned i=0;i<scbridge::parameterCount;++i) {
+            const auto scope=scbridge::controls[i].scope;
+            const bool perPart=(i>=2 && i<scbridge::legacyParameterCount) || scope==scbridge::ControlScope::Part;
+            controlAt(i).setEnabled((i<scbridge::legacyParameterCount || readAdvanced()) && !(allParts && perPart));
+        }
+    }
+    juce::AudioProcessorValueTreeState& parameters;
+    std::function<void(int)> mapAll;
+    juce::ComboBox partScope;
+    bool allParts=false;
+    int lastRequestedMap=0;
     std::function<juce::String()> readStatus;
     std::function<int()> readLatency;
     std::function<bool()> readAdvanced;
@@ -227,17 +316,21 @@ public:
         requestedLatency.store(preferences.getLatency());
         actualLatency.store(requestedLatency.load()); activeLatency = static_cast<uint32_t>(requestedLatency.load());
         setLatencySamples(activeLatency);
+#ifndef _WIN32
         auto notification = preferences.notification();
         preferenceNotification = CFStringCreateWithCString(nullptr, notification.toRawUTF8(), kCFStringEncodingUTF8);
         CFNotificationCenterAddObserver(CFNotificationCenterGetDistributedCenter(), this, preferencesChanged,
             preferenceNotification, nullptr, CFNotificationSuspensionBehaviorDeliverImmediately);
+#endif
         startTimerHz(10);
     }
     ~Processor() override {
         stopTimer();
         for (auto* id : ids) state.removeParameterListener(id,this);
+#ifndef _WIN32
         CFNotificationCenterRemoveObserver(CFNotificationCenterGetDistributedCenter(), this, preferenceNotification, nullptr);
         CFRelease(preferenceNotification);
+#endif
         releaseResources();
     }
     const juce::String getName() const override { return "Sound Canvas Bridge"; }
@@ -275,8 +368,10 @@ public:
             value = scbridge::normaliseLatency(value);
             bool saved = preferences.setLatency(value);
             preferenceError.store(!saved); requestedLatency.store(value);
+#ifndef _WIN32
             if (saved) CFNotificationCenterPostNotification(CFNotificationCenterGetDistributedCenter(), preferenceNotification,
                                                             nullptr, nullptr, true);
+#endif
         }, [this] { return advancedReady.load(); });
     }
     void prepareToPlay(double rate, int maximum) override {
@@ -299,6 +394,20 @@ public:
 #else
         auto core = scbridge::EngineLocation().core();
 #endif
+#ifdef _WIN32
+        HMODULE module=nullptr;
+        if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            reinterpret_cast<LPCWSTR>(&moduleAnchor),&module)) return;
+        wchar_t path[32768]{};
+        const auto count=GetModuleFileNameW(module,path,32768);
+        if(!count || count>=32768) return;
+        const auto directory=juce::File(juce::String(path)).getParentDirectory();
+        auto helper=directory.getParentDirectory().getChildFile("Resources/SoundCanvasHelper.exe");
+        if(!helper.existsAsFile()) helper=directory.getChildFile("SoundCanvasHelper.exe");
+        if(!core.existsAsFile() || !helper.existsAsFile()) { engineStatus.store(3);return; }
+        if(!windowsIpc.start(helper.getFullPathName().toWideCharPointer(),core.getFullPathName().toWideCharPointer())) return;
+        shared=windowsIpc.shared();
+#else
         Dl_info module{};
         if (!dladdr(reinterpret_cast<void*>(&moduleAnchor), &module) || !module.dli_fname) return;
         auto helper = juce::File(juce::String::fromUTF8(module.dli_fname)).getParentDirectory()
@@ -312,6 +421,7 @@ public:
         if (ftruncate(memory, sizeof(scbridge::Shared))) { releaseResources(); return; }
         shared = static_cast<scbridge::Shared*>(mmap(nullptr, sizeof(scbridge::Shared), PROT_READ | PROT_WRITE, MAP_SHARED, memory, 0));
         if (shared == MAP_FAILED) { shared = nullptr; releaseResources(); return; }
+#endif
         std::memset(shared, 0, sizeof(*shared));
         shared->version = scbridge::protocolVersion; shared->sampleRate = rate;
         shared->stateEpoch=stateEpoch.load();
@@ -319,6 +429,7 @@ public:
         scbridge::StateFrame restoration;
         shared->restoreSceneValid=restoredState.read(restoration) ? restoration.sceneValid : 0;
         if(shared->restoreSceneValid) shared->restoredScene=restoration.scene;
+#ifndef _WIN32
         int sockets[2];
         if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockets)) { releaseResources(); return; }
         socket = sockets[0];
@@ -346,6 +457,9 @@ public:
         posix_spawn_file_actions_destroy(&actions); posix_spawnattr_destroy(&attributes);
         close(childSocket); close(childMemory);
         if (result || !receive('R', 5000) || !exchange('S', 5000)) { releaseResources(); return; }
+#else
+        if(!exchange('S',5000)) { releaseResources();return; }
+#endif
         inputs.reset(); outputs.reset(); inputReady.reset(); outputReady.reset(); pending = {}; timeline = 0; gaps.store(0);
         missingSamples.store(0); lastBlock.store(0); lastOffline.store(false);
         healthy.store(true); resetRequested.store(false); engineStatus.store(1);
@@ -360,6 +474,9 @@ public:
         // Only the worker waits for the Intel process; never terminate a worker
         // while it owns shared memory. Its IPC wait is bounded to 250 ms.
         if (isThreadRunning()) waitForThreadToExit(-1);
+#ifdef _WIN32
+        windowsIpc.close();shared=nullptr;
+#else
         if (socket >= 0) { char quit = 'Q'; ::send(socket, &quit, 1, MSG_DONTWAIT); close(socket); socket = -1; }
         if (child > 0) {
             for (int i = 0; i < 50; ++i) {
@@ -377,6 +494,7 @@ public:
         }
         if (shared) { munmap(shared, sizeof(*shared)); shared = nullptr; }
         if (memory >= 0) { close(memory); memory = -1; }
+#endif
     }
     void processBlock(juce::AudioBuffer<float>& audio, juce::MidiBuffer& midi) override {
         juce::ScopedNoDenormals guard;
@@ -492,6 +610,14 @@ public:
         missingSamples.fetch_add(callbackMissing);
         midi.clear();
     }
+    bool standaloneMapSelection(int map,std::array<scbridge::ControlMessage,32>& messages) const {
+        scbridge::StateFrame snapshot;
+        if(map<1 || map>4 || !healthy.load() || !capturedState.read(snapshot) || snapshot.epoch!=stateEpoch.load()) return false;
+        // The mirror always captures legacy selections, even if advanced engine
+        // inspection is unavailable. Do not substitute default banks or patches.
+        messages=scbridge::allPartMapSelection(map,snapshot.scene);
+        return true;
+    }
     void getStateInformation(juce::MemoryBlock& destination) override {
         auto xml = state.copyState().createXml();
         scbridge::StateFrame snapshot;
@@ -583,6 +709,11 @@ private:
         }
     }
     void timerCallback() override {
+#ifdef _WIN32
+        if(++preferenceTicks>=10) {
+            preferenceTicks=0;preferences.reload();requestedLatency.store(preferences.getLatency());
+        }
+#endif
         auto latency = actualLatency.load();
         if (getLatencySamples() != latency) setLatencySamples(latency);
         for (unsigned i=1;i<scbridge::parameterCount;++i) {
@@ -614,10 +745,12 @@ private:
         if(scope==scbridge::ControlScope::InsertionParameter && !sameContext(scbridge::insertionSelectorIndex)) return false;
         return true;
     }
+#ifndef _WIN32
     static void preferencesChanged(CFNotificationCenterRef, void* observer, CFStringRef, const void*, CFDictionaryRef) {
         auto& self = *static_cast<Processor*>(observer);
         self.preferences.reload(); self.requestedLatency.store(self.preferences.getLatency()); self.preferenceError.store(false);
     }
+#endif
     void run() override {
         workerRealtime.store(scbridge::configureAudioWorker(currentRate.load()));
         helperRealtime.store(shared->helperRealtime != 0);
@@ -754,6 +887,7 @@ private:
             shared->generations[i]=scbridge::controlGeneration(command);
         }
     }
+#ifndef _WIN32
     bool receive(char expected, int milliseconds) {
         pollfd descriptor{socket, POLLIN, 0}; char reply = 0;
         auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(milliseconds);
@@ -768,14 +902,21 @@ private:
             return bytes == 1 && reply == expected;
         }
     }
+#endif
     bool exchange(char command, int milliseconds) {
-        __sync_synchronize();
+#ifdef _WIN32
+        return windowsIpc.exchange(command,milliseconds);
+#else
+        std::atomic_thread_fence(std::memory_order_seq_cst);
         if (write(socket, &command, 1) != 1 || !receive('D', milliseconds)) return false;
-        __sync_synchronize(); return shared->result == 0;
+        std::atomic_thread_fence(std::memory_order_seq_cst); return shared->result == 0;
+#endif
     }
     juce::AudioProcessorValueTreeState state;
     scbridge::PerformancePreferences preferences{scbridge::performanceFile()};
+#ifndef _WIN32
     CFStringRef preferenceNotification = nullptr;
+#endif
     std::atomic<int> requestedLatency{scbridge::minimumLatency}, actualLatency{scbridge::minimumLatency};
     std::atomic<bool> preferenceError{false};
     std::atomic<double> currentRate{44100.0};
@@ -789,7 +930,12 @@ private:
     scbridge::StateMailbox<scbridge::StateFrame> capturedState,restoredState;
     inline static thread_local Processor* reflecting=nullptr;
     scbridge::Shared* shared = nullptr;
+#ifdef _WIN32
+    scbridge::WindowsIpc windowsIpc;
+    int preferenceTicks=0;
+#else
     int socket = -1, memory = -1; pid_t child = -1;
+#endif
     std::atomic<bool> healthy{false};
     std::atomic<bool> workerRealtime{false}, helperRealtime{false};
     std::atomic<int> engineStatus{0};
@@ -806,3 +952,10 @@ private:
 };
 }
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new Processor(); }
+void scbridge::configureStandaloneEditor(juce::AudioProcessorEditor& editor,std::function<void(int)> applyMapToAll) {
+    if(auto* bridge=dynamic_cast<BridgeEditor*>(&editor)) bridge->configureStandalone(std::move(applyMapToAll));
+}
+bool scbridge::standaloneMapSelection(juce::AudioProcessor& processor,int map,std::array<ControlMessage,32>& messages) {
+    if(auto* bridge=dynamic_cast<Processor*>(&processor)) return bridge->standaloneMapSelection(map,messages);
+    return false;
+}

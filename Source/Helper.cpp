@@ -3,30 +3,66 @@
 #include "ControllerMirror.h"
 #include "CoreState.h"
 #include "ControlMessage.h"
+#ifdef _WIN32
+#include "WindowsIpc.h"
+#else
 #include <dlfcn.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#endif
 #include <algorithm>
 #include <array>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
+#include <atomic>
+#ifndef _WIN32
 #include <pthread.h>
+#endif
 
 template <typename T> T function(void* library, const char* name) {
-    auto result = reinterpret_cast<T>(dlsym(library, name));
+    auto result = reinterpret_cast<T>(
+#ifdef _WIN32
+        GetProcAddress(static_cast<HMODULE>(library),name)
+#else
+        dlsym(library, name)
+#endif
+    );
     if (!result) throw std::runtime_error(name);
     return result;
 }
 
-int main(int argc, char** argv) {
+int helperMain(int argc, char** argv) {
+#ifdef _WIN32
+    if(argc!=5) return 2;
+    using namespace scbridge;
+    auto handle=[](const char* text) { return reinterpret_cast<HANDLE>(static_cast<uintptr_t>(std::strtoull(text,nullptr,10))); };
+    const auto mapping=handle(argv[2]),request=handle(argv[3]),response=handle(argv[4]);
+    auto* block=static_cast<WindowsShared*>(MapViewOfFile(mapping,FILE_MAP_ALL_ACCESS,0,0,sizeof(WindowsShared)));
+    if(!block) return 3;
+    auto* shared=&block->audio;
+    auto replyToParent=[&](char reply) { InterlockedExchange(&block->reply,reply);return SetEvent(response)!=FALSE; };
+    auto readCommand=[&](char& command) {
+        if(WaitForSingleObject(request,INFINITE)!=WAIT_OBJECT_0) return false;
+        command=static_cast<char>(InterlockedExchange(&block->command,0));return true;
+    };
+    const auto count=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,argv[1],-1,nullptr,0);
+    if(count<=0) return 4;
+    std::wstring path(static_cast<size_t>(count),L'\0');
+    MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,argv[1],-1,path.data(),count);
+    SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+    void* library=LoadLibraryExW(path.c_str(),nullptr,LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR|LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+#else
     if (argc != 2) return 2;
     pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
     using namespace scbridge;
     auto* shared = static_cast<Shared*>(mmap(nullptr, sizeof(Shared), PROT_READ | PROT_WRITE, MAP_SHARED, 4, 0));
     if (shared == MAP_FAILED) return 3;
     void* library = dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);
+    auto replyToParent=[](char reply) { return write(3,&reply,1)==1; };
+    auto readCommand=[](char& command) { return read(3,&command,1)==1; };
+#endif
     if (!library) return 4;
     try {
         auto initialize = function<int (*)(int)>(library, "TG_initialize");
@@ -52,10 +88,10 @@ int main(int argc, char** argv) {
         const unsigned char gsReset[] = {0xf0,0x41,0x10,0x42,0x12,0x40,0,0x7f,0,0x41,0xf7};
         bool active = false;
         char reply = 'R';
-        if (sendto(3, &reply, 1, 0, nullptr, 0) != 1) return 6;
+        if (!replyToParent(reply)) return 6;
         char command;
-        while (read(3, &command, 1) == 1 && command != 'Q') {
-            __sync_synchronize();
+        while (readCommand(command) && command != 'Q') {
+            std::atomic_thread_fence(std::memory_order_seq_cst);
             shared->result = 1;
             if (shared->version != protocolVersion || shared->frames > maxFrames ||
                 shared->eventCount > maxEvents || shared->midiBytes > maxMidiBytes) return 7;
@@ -201,13 +237,33 @@ int main(int argc, char** argv) {
             mirror.capture(shared->capturedScene);
             shared->capturedSceneValid=advancedReady && coreState.capture(shared->capturedScene) && validScene(shared->capturedScene) ? 1 : 0;
             shared->result = 0;
-            __sync_synchronize();
+            std::atomic_thread_fence(std::memory_order_seq_cst);
             reply = 'D';
-            if (write(3, &reply, 1) != 1) break;
+            if (!replyToParent(reply)) break;
         }
         if (active) deactivate();
         terminate();
     } catch (...) { return 13; }
+#ifdef _WIN32
+    FreeLibrary(static_cast<HMODULE>(library));UnmapViewOfFile(block);
+    CloseHandle(mapping);CloseHandle(request);CloseHandle(response);
+#else
     dlclose(library); munmap(shared, sizeof(Shared)); close(3); close(4);
+#endif
     return 0;
 }
+#ifdef _WIN32
+int wmain(int argc,wchar_t** values) {
+    std::vector<std::string> strings;std::vector<char*> arguments;
+    for(int i=0;i<argc;++i) {
+        const auto length=WideCharToMultiByte(CP_UTF8,0,values[i],-1,nullptr,0,nullptr,nullptr);
+        if(length<=0) return 2;
+        strings.emplace_back(static_cast<size_t>(length),'\0');
+        WideCharToMultiByte(CP_UTF8,0,values[i],-1,strings.back().data(),length,nullptr,nullptr);
+    }
+    for(auto& value:strings) arguments.push_back(value.data());
+    return helperMain(argc,arguments.data());
+}
+#else
+int main(int argc,char** argv) { return helperMain(argc,argv); }
+#endif

@@ -25,8 +25,15 @@ inline juce::File performanceFile() {
 #ifdef SOUNDCANVAS_TEST_PROFILE
     return juce::File(SOUNDCANVAS_TEST_PROFILE);
 #else
+    const auto profile=juce::SystemStats::getEnvironmentVariable("SCBRIDGE_PROFILE_DIR",{});
+    if(profile.isNotEmpty() && juce::File::isAbsolutePath(profile))
+        return juce::File(profile).getChildFile("Settings.xml");
     return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+#ifdef _WIN32
+        .getChildFile("OnjMusic/SoundCanvasBridge/Settings.xml");
+#else
         .getChildFile("Application Support/OnjMusic/SoundCanvasBridge/Settings.xml");
+#endif
 #endif
 }
 

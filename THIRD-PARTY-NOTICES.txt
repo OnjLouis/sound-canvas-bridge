@@ -1,4 +1,4 @@
-Sound Canvas Bridge 1.0.0
+Sound Canvas Bridge 1.2.0
 
 Original bridge code: Copyright (c) 2026 Andre Louis / OnjMusic, MIT.
 The JUCE-based official application and plug-ins are distributed under GNU
@@ -39,6 +39,12 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+Windows standalone ASIO support uses the official Steinberg ASIO SDK under its
+GNU GPL version 3 option, combined under GNU AGPLv3. The upstream ASIO licence
+is included in ThirdParty/ASIO-LICENSE.txt. No vendor ASIO driver is included.
+The experimental Windows MIDI Services SDK runtime is not in this distribution;
+normal system MIDI inputs do not require that preview runtime.
 
 Roland Sound Canvas VA is an external, owner-installed dependency. No Roland
 binary, ROM, licence key or installer is distributed in this project. Roland,

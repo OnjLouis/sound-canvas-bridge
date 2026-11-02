@@ -2,6 +2,16 @@
 <html lang="en-GB"><head><meta charset="utf-8"><title>Sound Canvas Bridge Version History</title>
 <style>body{max-width:50rem;margin:2rem auto;padding:0 1rem;font:1rem/1.6 system-ui;color:#181818;background:#fff}</style></head>
 <body><main><h1>Sound Canvas Bridge Version History</h1>
+<h2>1.2.0</h2>
+<ul><li>Windows x64 standalone and shared VST3 installer, with signed payload/update verification and transactional rollback.</li>
+<li>Standalone Part selector adds All for sound-map changes across all sixteen parts without broadcasting unrelated edits.</li>
+<li>F9 All Notes Off and shorter Control/Command shortcuts, with the standard Preferences shortcut retained.</li>
+<li>All-parts sound-map arrows continue from the last request on both platforms; Mac Preferences includes both category tabs in keyboard navigation.</li>
+<li>The Part selector keeps its explanation in F1 help instead of automatically announcing it. Windows installer Open respects the saved hidden-start preference and closes the installer.</li>
+<li>Saved audio outputs no longer silently fall back to a different interface; startup failures retain the selection and explain the error.</li>
+<li>Update helper replies are bounded UTF-8, including long release notes and error messages.</li>
+<li>Native sound reselection makes All-parts map changes audible immediately. Standalone editor replacement now clears the previous active editor correctly.</li>
+<li>Existing VST/AU automation parameters, saved scenes, NKS identities and previews remain unchanged.</li></ul>
 <h2>1.1.0 - 2 November 2026</h2>
 <ul><li>Insertion-effect algorithm selection, all 20 raw parameter slots, reverb/chorus/delay sends and EQ routing.</li>
 <li>A parameter selector and value pair, plus direct controls for each slot, with native-engine readback.</li>

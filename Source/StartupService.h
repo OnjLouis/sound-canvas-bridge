@@ -1,5 +1,8 @@
 #pragma once
 #include <juce_audio_utils/juce_audio_utils.h>
+#ifdef _WIN32
+#include "StartupServiceWindows.h"
+#else
 #import <Foundation/Foundation.h>
 #include <unistd.h>
 #include <signal.h>
@@ -75,3 +78,4 @@ private:
     Runner invoke;
 };
 }
+#endif

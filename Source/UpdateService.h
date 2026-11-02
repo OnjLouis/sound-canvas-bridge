@@ -17,6 +17,7 @@ public:
     juce::String status() const { return lastStatus; }
     void checkNow() { check(true); }
 private:
+    static constexpr int maximumReplyBytes=3072;
     void timerCallback() override {
         startTimer(60000);
         const auto now=juce::Time::currentTimeMillis();
@@ -37,9 +38,18 @@ private:
     }
     void run() override {
         const auto helper=juce::File::getSpecialLocation(juce::File::currentExecutableFile)
+#ifdef _WIN32
+            .getParentDirectory().getChildFile("SoundCanvasMaintenance.exe");
+#else
             .getParentDirectory().getParentDirectory().getChildFile("Resources/SoundCanvasMaintenance");
+#endif
         juce::ChildProcess child;
+#ifdef _WIN32
+        juce::StringArray arguments{helper.getFullPathName(),preparing ? "--prepare-base64" : "--check",
+            preparing ? juce::Base64::toBase64(releaseJSON.toRawUTF8(),releaseJSON.getNumBytesAsUTF8()) : current};
+#else
         juce::StringArray arguments{helper.getFullPathName(),preparing ? "--prepare-json" : "--check",preparing ? releaseJSON : current};
+#endif
         juce::String output;bool failed=false;
         if(!helper.existsAsFile() || !child.start(arguments)) { output="The update helper could not start.";failed=true; }
         else {
@@ -48,7 +58,15 @@ private:
                 child.waitForProcessToFinish(20);
             }
             if(child.isRunning()) { child.kill();child.waitForProcessToFinish(1000);output="The update operation was cancelled or timed out.";failed=true; }
-            else output+=child.readAllProcessOutput();
+            else {
+                // The helpers enforce this UTF-8 reply limit before writing, so
+                // waiting for exit cannot fill the platform's output pipe.
+                char bytes[maximumReplyBytes+2];
+                const int count=child.readProcessOutput(bytes,sizeof(bytes));
+                if(count>maximumReplyBytes+1) { output="The update helper reply exceeded its limit.";failed=true; }
+                else output=juce::String::fromUTF8(bytes,count);
+                juce::Logger::writeToLog("Update helper exited with code "+juce::String(child.getExitCode())+"; reply bytes "+juce::String(count));
+            }
         }
         if(threadShouldExit()) return;
         auto token=alive;const bool wasManual=manualRequest,wasPreparing=preparing;
@@ -62,7 +80,11 @@ private:
                 const auto version=release.getProperty("version",{}).toString();
                 lastStatus="Version "+version+" is available.";
                 juce::AlertWindow::showOkCancelBox(juce::MessageBoxIconType::InfoIcon,"Sound Canvas Bridge "+version+" Is Available",
+#ifdef _WIN32
+                    "Download the signed update and open its installer? The installer updates the standalone and VST3 together. Save your work and stop playback before installing.\n\n"+release.getProperty("notes",{}).toString(),
+#else
                     "Download the verified disk image and open its installer? The installer updates the standalone, AU and VST3 together. Playback will not stop unless you choose Install.",
+#endif
                     "Download and Open Installer","Later",nullptr,juce::ModalCallbackFunction::create([this,token,release](int choice) {
                         if(!token->load() || !choice || busy()) return;
                         releaseJSON=juce::JSON::toString(release,true);preparing=true;manualRequest=true;

@@ -23,6 +23,32 @@ class NumericSlider final : public juce::Slider {
         }
     };
 public:
+#ifdef _WIN32
+    void setAccessibilityValueOffset(double value) { accessibilityValueOffset=value; }
+    std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override {
+        class Value final : public juce::AccessibilityValueInterface {
+        public:
+            explicit Value(NumericSlider& value):slider(value) {}
+            bool isReadOnly() const override { return false; }
+            double getCurrentValue() const override { return slider.getValue()+slider.accessibilityValueOffset; }
+            juce::String getCurrentValueAsString() const override { return slider.getTextFromValue(slider.getValue()); }
+            void setValue(double value) override {
+                juce::Slider::ScopedDragNotification drag(slider);
+                slider.setValue(value-slider.accessibilityValueOffset,juce::sendNotificationSync);
+            }
+            void setValueAsString(const juce::String& text) override {
+                setValue(slider.getValueFromText(text)+slider.accessibilityValueOffset);
+            }
+            AccessibleValueRange getRange() const override {
+                return {{slider.getMinimum()+slider.accessibilityValueOffset,slider.getMaximum()+slider.accessibilityValueOffset},slider.getInterval()};
+            }
+        private:
+            NumericSlider& slider;
+        };
+        return std::make_unique<juce::AccessibilityHandler>(*this,juce::AccessibilityRole::slider,
+            juce::AccessibilityActions{},juce::AccessibilityHandler::Interfaces{std::make_unique<Value>(*this)});
+    }
+#endif
     NumericSlider() {
         addChildComponent(entry);
         entry.setMultiLine(false); entry.setReturnKeyStartsNewLine(false);
@@ -87,7 +113,9 @@ private:
 #endif
         if (auto* handler = getAccessibilityHandler())
             handler->notifyAccessibilityEvent(juce::AccessibilityEvent::valueChanged);
+#ifndef _WIN32
         juce::AccessibilityHandler::postAnnouncement(text,juce::AccessibilityHandler::AnnouncementPriority::medium);
+#endif
     }
     void applyValue(double next) {
         next = juce::jlimit(getMinimum(),getMaximum(),next);
@@ -124,8 +152,13 @@ private:
         int integer = 0;
         const auto result = std::from_chars(bytes.data(),bytes.data()+bytes.size(),integer);
         if (bytes.empty() || result.ec != std::errc{} || result.ptr != bytes.data()+bytes.size()) {
+#ifdef _WIN32
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Enter a value",
+                getName()+" is unchanged. Enter a whole number.");
+#else
             juce::AccessibilityHandler::postAnnouncement(getName()+" unchanged. Enter a whole number.",
                 juce::AccessibilityHandler::AnnouncementPriority::medium);
+#endif
             return false;
         }
         applyValue(getValueFromText(juce::String(integer)));
@@ -143,6 +176,9 @@ private:
         }
     }
     Entry entry;
+#ifdef _WIN32
+    double accessibilityValueOffset=0;
+#endif
     juce::String initialText;
     bool editing = false, closing = false;
 };
