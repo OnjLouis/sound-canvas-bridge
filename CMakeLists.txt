@@ -2,9 +2,14 @@ cmake_minimum_required(VERSION 3.22)
 if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET 12.0 CACHE STRING "Minimum macOS version")
 endif()
-project(OnjSoundCanvasPilot VERSION 1.3.0 LANGUAGES C CXX)
+project(OnjSoundCanvasPilot VERSION 1.4.0 LANGUAGES C CXX)
 if(APPLE)
     enable_language(OBJCXX)
+    option(SCBRIDGE_USE_TRANSLATED_ENGINE "Use the native Mac compatibility worker" ON)
+    set(SCBRIDGE_MAC_ARCHITECTURES "arm64;x86_64" CACHE STRING "Mac front-end architectures")
+    if(SCBRIDGE_USE_TRANSLATED_ENGINE)
+        add_compile_definitions(SCBRIDGE_MAC_TRANSLATION_AVAILABLE=1)
+    endif()
 elseif(NOT WIN32)
     message(FATAL_ERROR "Sound Canvas Bridge supports macOS and Windows")
 endif()
@@ -36,7 +41,7 @@ juce_add_plugin(SoundCanvasBridge
     COPY_PLUGIN_AFTER_BUILD FALSE PRODUCT_NAME "Sound Canvas Bridge")
 if(APPLE)
     set_target_properties(SoundCanvasBridge SoundCanvasBridge_AU SoundCanvasBridge_VST3
-        PROPERTIES OSX_ARCHITECTURES "arm64;x86_64")
+        PROPERTIES OSX_ARCHITECTURES "${SCBRIDGE_MAC_ARCHITECTURES}")
 endif()
 target_sources(SoundCanvasBridge PRIVATE "${SOURCE}/Processor.cpp")
 target_compile_definitions(SoundCanvasBridge PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
@@ -45,16 +50,23 @@ target_link_libraries(SoundCanvasBridge PRIVATE juce::juce_audio_utils juce::juc
 
 juce_add_gui_app(SoundCanvasStandalone PRODUCT_NAME "Sound Canvas Bridge"
     COMPANY_NAME OnjMusic BUNDLE_ID me.onj.soundcanvasbridge.manager VERSION ${PROJECT_VERSION})
-set_target_properties(SoundCanvasStandalone PROPERTIES OSX_ARCHITECTURES "arm64;x86_64")
+set_target_properties(SoundCanvasStandalone PROPERTIES OSX_ARCHITECTURES "${SCBRIDGE_MAC_ARCHITECTURES}")
 target_sources(SoundCanvasStandalone PRIVATE "${SOURCE}/Standalone.cpp" "${SOURCE}/Processor.cpp")
 if(APPLE)
     set_source_files_properties("${SOURCE}/Standalone.cpp" PROPERTIES LANGUAGE OBJCXX)
 endif()
 target_compile_definitions(SoundCanvasStandalone PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
     SCBRIDGE_APP_VERSION="${PROJECT_VERSION}")
-target_link_libraries(SoundCanvasStandalone PRIVATE juce::juce_audio_utils juce::juce_recommended_config_flags)
+target_link_libraries(SoundCanvasStandalone PRIVATE juce::juce_audio_utils juce::juce_cryptography juce::juce_recommended_config_flags)
+include(cmake/OfficialEngine.cmake)
 
 if(APPLE)
+if(SCBRIDGE_USE_TRANSLATED_ENGINE)
+    include(cmake/TranslatedEngine.cmake)
+    scbridge_copy_translated_runtime(SoundCanvasStandalone)
+    scbridge_copy_translated_runtime(SoundCanvasBridge_AU)
+    scbridge_copy_translated_runtime(SoundCanvasBridge_VST3)
+else()
 execute_process(COMMAND xcrun --show-sdk-path OUTPUT_VARIABLE HELPER_SDK
     OUTPUT_STRIP_TRAILING_WHITESPACE COMMAND_ERROR_IS_FATAL ANY)
 add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/SoundCanvasHelper"
@@ -64,6 +76,7 @@ add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/SoundCanvasHelper"
         "${SOURCE}/CoreState.h" "${SOURCE}/Scene.h" "${SOURCE}/WorkerScheduling.h" "${SOURCE}/ControllerMirror.h"
         "${SOURCE}/Insertion.h" "${SOURCE}/ControlMessage.h"
     VERBATIM)
+endif()
 add_custom_target(SoundCanvasHelperBuild DEPENDS "${CMAKE_BINARY_DIR}/SoundCanvasHelper")
 add_custom_command(OUTPUT "${CMAKE_BINARY_DIR}/SoundCanvasMaintenance"
     COMMAND xcrun swiftc -swift-version 5 -O -target arm64-apple-macosx12.0
@@ -85,6 +98,8 @@ add_custom_target(SoundCanvasInstallerBundle
     COMMAND codesign --force --deep --sign - "${CMAKE_BINARY_DIR}/Install Sound Canvas Bridge.app"
     DEPENDS SoundCanvasMaintenanceBuild VERBATIM)
 add_custom_target(SoundCanvasStandaloneBundle
+    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/Resources/DawPresetsMac.zip"
+        "$<TARGET_BUNDLE_DIR:SoundCanvasStandalone>/Contents/Resources/DAW Presets.zip"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/Resources/Manual.html"
         "$<TARGET_BUNDLE_DIR:SoundCanvasStandalone>/Contents/Resources/Manual.html"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/Resources/VersionHistory.html"
@@ -189,6 +204,7 @@ else()
         target_link_options(SoundCanvasBridge_VST3 PRIVATE -static)
     endif()
     add_custom_target(SoundCanvasStandaloneBundle
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/Resources/DawPresetsWindows.zip" "$<TARGET_FILE_DIR:SoundCanvasStandalone>/DAW Presets.zip"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_BINARY_DIR}/SoundCanvasMaintenance.exe" "$<TARGET_FILE_DIR:SoundCanvasStandalone>"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/Resources/WindowsUpdateKey.xml" "$<TARGET_FILE_DIR:SoundCanvasStandalone>"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:SoundCanvasHelper>" "$<TARGET_FILE_DIR:SoundCanvasStandalone>"
@@ -213,28 +229,85 @@ if(SCBRIDGE_EXTRA_TESTS)
     include("${SCBRIDGE_EXTRA_TESTS}")
 endif()
 if(BUILD_TESTING)
+    add_executable(BackendTests Tests/BackendTests.cpp)
+    if(APPLE)
+        set_target_properties(BackendTests PROPERTIES OSX_ARCHITECTURES "arm64;x86_64")
+    endif()
+    add_test(NAME Backend COMMAND BackendTests)
+    if(APPLE OR WIN32)
+        juce_add_console_app(OfficialEngineTests PRODUCT_NAME "Official Engine Tests")
+        target_sources(OfficialEngineTests PRIVATE Tests/OfficialEngineTests.cpp)
+        target_compile_definitions(OfficialEngineTests PRIVATE JUCE_USE_CURL=0)
+        target_link_libraries(OfficialEngineTests PRIVATE juce::juce_cryptography juce::juce_recommended_config_flags)
+        add_test(NAME OfficialEngine COMMAND OfficialEngineTests "${CMAKE_BINARY_DIR}/official-engine-fixture")
+    endif()
+    add_executable(CoreLayoutTests Tests/CoreLayoutTests.cpp)
+    target_compile_features(CoreLayoutTests PRIVATE cxx_std_17)
+    if(MSVC)
+        target_compile_options(CoreLayoutTests PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(CoreLayoutTests PRIVATE -UNDEBUG)
+    endif()
+    add_test(NAME CoreLayouts COMMAND CoreLayoutTests)
+    juce_add_console_app(DawPresetsTests PRODUCT_NAME "DAW Preset Tests")
+    target_sources(DawPresetsTests PRIVATE Tests/DawPresetsTests.cpp)
+    target_link_libraries(DawPresetsTests PRIVATE juce::juce_cryptography juce::juce_recommended_config_flags)
+    target_compile_definitions(DawPresetsTests PRIVATE JUCE_USE_CURL=0)
+    add_test(NAME DawPresets COMMAND DawPresetsTests "${CMAKE_CURRENT_BINARY_DIR}/daw-preset-test-files")
+    if(APPLE)
+        set(daw_preset_package Resources/DawPresetsMac.zip)
+    else()
+        set(daw_preset_package Resources/DawPresetsWindows.zip)
+    endif()
+    add_test(NAME DawPresetPackage COMMAND DawPresetsTests "${CMAKE_CURRENT_BINARY_DIR}/daw-package-test-files" "${CMAKE_CURRENT_SOURCE_DIR}/${daw_preset_package}")
+    set_tests_properties(DawPresets PROPERTIES TIMEOUT 60)
+    set_tests_properties(DawPresetPackage PROPERTIES TIMEOUT 180)
+    juce_add_console_app(PluginUiTests PRODUCT_NAME "Plugin UI Tests")
+    target_sources(PluginUiTests PRIVATE Tests/PluginUiTests.cpp "${SOURCE}/Processor.cpp")
+    target_compile_definitions(PluginUiTests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1 SCBRIDGE_TEST_ANNOUNCEMENTS=1)
+    target_link_libraries(PluginUiTests PRIVATE juce::juce_audio_utils juce::juce_recommended_config_flags)
+    if(WIN32)
+        target_compile_definitions(PluginUiTests PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
+        target_link_libraries(PluginUiTests PRIVATE avrt)
+    endif()
+    add_test(NAME PluginUi COMMAND PluginUiTests)
+    set_tests_properties(PluginUi PROPERTIES TIMEOUT 20
+        ENVIRONMENT "SCBRIDGE_PROFILE_DIR=${CMAKE_CURRENT_BINARY_DIR}/plugin-ui-test-profile")
     if(APPLE)
         juce_add_console_app(StandaloneUiTests PRODUCT_NAME "Standalone UI Tests")
         target_sources(StandaloneUiTests PRIVATE Tests/StandaloneUiTests.cpp "${SOURCE}/Processor.cpp")
         set_source_files_properties(Tests/StandaloneUiTests.cpp PROPERTIES LANGUAGE OBJCXX)
-        target_compile_definitions(StandaloneUiTests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
-        target_link_libraries(StandaloneUiTests PRIVATE juce::juce_audio_utils juce::juce_recommended_config_flags)
+        target_compile_definitions(StandaloneUiTests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+        target_link_libraries(StandaloneUiTests PRIVATE juce::juce_audio_utils juce::juce_cryptography juce::juce_recommended_config_flags)
         set_target_properties(StandaloneUiTests PROPERTIES OSX_ARCHITECTURES "arm64;x86_64")
+        add_dependencies(StandaloneUiTests SoundCanvasEngineDownload)
+        add_custom_command(TARGET StandaloneUiTests POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_BINARY_DIR}/StandaloneUiTests_artefacts/Resources"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:SoundCanvasEngineDownload>"
+                "${CMAKE_BINARY_DIR}/StandaloneUiTests_artefacts/Resources/SoundCanvasEngineDownload")
         add_test(NAME StandaloneUi COMMAND StandaloneUiTests)
         set_tests_properties(StandaloneUi PROPERTIES ENVIRONMENT "SCBRIDGE_PROFILE_DIR=${CMAKE_CURRENT_BINARY_DIR}/ui-test-profile")
     endif()
-    foreach(name ControllerMirror Scene Insertion)
+    foreach(name ControllerMirror Scene Insertion ProgramCatalogue ProgramSelection EngineSetupPolicy)
         add_executable(${name}Tests "Tests/${name}Tests.cpp")
         target_include_directories(${name}Tests PRIVATE Source)
         set_target_properties(${name}Tests PROPERTIES OSX_ARCHITECTURES "arm64;x86_64")
+        if(MSVC)
+            target_compile_options(${name}Tests PRIVATE /UNDEBUG)
+        else()
+            target_compile_options(${name}Tests PRIVATE -UNDEBUG)
+        endif()
         add_test(NAME ${name} COMMAND ${name}Tests)
     endforeach()
     add_executable(WakeSignalTests Tests/WakeSignalTests.cpp)
     target_include_directories(WakeSignalTests PRIVATE Source)
     if(WIN32)
         add_executable(WindowsUiTests Tests/WindowsUiTests.cpp "${SOURCE}/Processor.cpp")
-        target_compile_definitions(WindowsUiTests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 NOMINMAX WIN32_LEAN_AND_MEAN)
-        target_link_libraries(WindowsUiTests PRIVATE juce::juce_audio_utils juce::juce_recommended_config_flags avrt)
+        target_compile_definitions(WindowsUiTests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 NOMINMAX WIN32_LEAN_AND_MEAN JUCE_MODAL_LOOPS_PERMITTED=1)
+        add_dependencies(WindowsUiTests SoundCanvasEngineDownload)
+        add_custom_command(TARGET WindowsUiTests POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:SoundCanvasEngineDownload>" "$<TARGET_FILE_DIR:WindowsUiTests>/SoundCanvasEngineDownload.exe")
+        target_link_libraries(WindowsUiTests PRIVATE juce::juce_audio_utils juce::juce_cryptography juce::juce_recommended_config_flags avrt)
         add_test(NAME WindowsUi COMMAND WindowsUiTests "${CMAKE_CURRENT_BINARY_DIR}/ui-test-files")
         set_tests_properties(WindowsUi PROPERTIES TIMEOUT 20)
         set_tests_properties(WindowsUi PROPERTIES ENVIRONMENT "SCBRIDGE_PROFILE_DIR=${CMAKE_CURRENT_BINARY_DIR}/ui-test-profile")

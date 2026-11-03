@@ -2,6 +2,17 @@
 <html lang="en-GB"><head><meta charset="utf-8"><title>Sound Canvas Bridge Version History</title>
 <style>body{max-width:50rem;margin:2rem auto;padding:0 1rem;font:1rem/1.6 system-ui;color:#181818;background:#fff}</style></head>
 <body><main><h1>Sound Canvas Bridge Version History</h1>
+<h2>1.4.0</h2>
+<ul><li>Searchable named program and drum browser, current sound names and grouped native AU/VST3 preset files instead of an oversized flat AU menu.</li>
+<li>Arrowable current-name selector, concise browser rows and on-request address details; native accessibility help for preset controls.</li>
+<li>Native preset groups open directly at Programs and Drums, without a Factory wrapper; verified migration preserves custom presets and restores both groups if replacement fails.</li>
+<li>Native Apple Silicon playback no longer requires Rosetta. Intel Mac hosts retain the original Mac engine backend.</li>
+<li>Windows and native Apple Silicon standalone builds offer a verified official engine download in General, beside Browse. Native extraction includes the required external engine runtime, with progress, cancellation and protection of the working engine. No Roland engine or Microsoft engine runtime is bundled.</li>
+<li>First launch and missing-engine recovery open General. Hosted plug-ins direct users to standalone setup without downloading inside an audio host or interrupting scans and offline rendering.</li>
+<li>Hosted keyboard-focus entry reaches the controls without relying on standalone focus recovery.</li>
+<li>Sound changes preserve mixer/effect settings and existing part roles, with coherent selection and save/recall handling.</li>
+<li>Saved scenes retain custom melodic/drum assignments; older scenes remain readable. Existing NKS files, previews and the 93 automation controls are unchanged.</li>
+<li>VST3 native factory lists remain disabled to avoid changing per-channel MIDI program handling; its built-in browser is available.</li></ul>
 <h2>1.3.0</h2>
 <ul><li>Windows uses a standard setup wizard with Next, Back, Install and Finish, optional desktop and Start-menu shortcuts, and an Installed Apps entry.</li>
 <li>Windows installation retains recovery copies until the complete wizard succeeds. Uninstall verifies and removes the bridge app and VST3 while keeping settings, NKS presets and Roland files.</li>

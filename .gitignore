@@ -3,6 +3,8 @@
 **/.DS_Store
 *.dmg
 *.zip
+!/Resources/DawPresetsMac.zip
+!/Resources/DawPresetsWindows.zip
 *.log
 *.p12
 *.p8

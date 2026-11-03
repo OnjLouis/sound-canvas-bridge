@@ -9,7 +9,8 @@ shell, configure and build:
 
 ```powershell
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DASIO_SDK_DIR=C:/path/to/ASIOSDK
-cmake --build build --parallel 4 --target SoundCanvasStandaloneBundle SoundCanvasPlugins WindowsUiTests ControllerMirrorTests SceneTests InsertionTests WindowsIpcTests WakeSignalTests MockCoreWindows
+cmake --build build --parallel 4
+cmake --build build --parallel 4 --target SoundCanvasStandaloneBundle SoundCanvasPlugins
 ctest --test-dir build --output-on-failure
 ```
 
@@ -59,19 +60,24 @@ may contain Roland binaries, settings, logs, host projects or NKS content.
 ## macOS
 
 Use macOS 12 or later with Xcode and its command-line tools, CMake 3.22 or newer,
-Git, and an Apple SDK supporting arm64 and x86_64. The official build used JUCE
+Python 3.9 or newer, XcodeGen, Git, and an Apple SDK supporting arm64 and x86_64. The official build used JUCE
 8.0.15, pinned to commit `91ad83ae34a81e0833b1a2b0866f54846370ae53`.
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DJUCE_DIR="$PWD/Dependencies/JUCE"
+cmake --build build --config Release --parallel 4
 cmake --build build --config Release --parallel 4 --target \
-  SoundCanvasStandaloneBundle SoundCanvasPlugins SoundCanvasInstallerBundle \
-  ControllerMirrorTests SceneTests InsertionTests
+  SoundCanvasStandaloneBundle SoundCanvasPlugins SoundCanvasInstallerBundle
 ctest --test-dir build --output-on-failure
 ```
 
-The first configure fetches the pinned JUCE source. For an existing, unmodified
-JUCE 8.0.15 checkout, add `-DJUCE_DIR=/path/to/JUCE` instead. JUCE's source and all
+The release source archive supplies `Dependencies/JUCE`, `Dependencies/MacRuntime`
+and `Dependencies/BoxedWine-source.zip`. These are build inputs, not files from a
+live installation. No Roland engine or Microsoft engine runtime is included.
+When building a Git checkout, obtain those inputs from the matching release
+source archive, or supply `JUCE_DIR`, `SCBRIDGE_TRANSLATED_RUNTIME` and the pinned
+BoxedWine source separately. Omitting `JUCE_DIR` fetches the pinned JUCE source.
+JUCE's source and all
 of its dependency notices are available at that exact revision:
 https://github.com/juce-framework/JUCE/tree/91ad83ae34a81e0833b1a2b0866f54846370ae53
 
@@ -80,17 +86,43 @@ under `Dependencies/JUCE`. When using this archive, configure with
 `-DJUCE_DIR="$PWD/Dependencies/JUCE"` to build without fetching it again.
 
 Outputs are beneath `build/SoundCanvasStandalone_artefacts/Release` and
-`build/SoundCanvasBridge_artefacts/Release/{AU,VST3}`. The helper remains x86_64
-because it loads the original Intel engine; the front ends and maintenance tool
-contain both architectures. A build does not install anything automatically.
+`build/SoundCanvasBridge_artefacts/Release/{AU,VST3}`. The front ends, helper and
+maintenance tool contain both architectures. Apple Silicon selects the native
+BoxedWine compatibility worker; Intel selects the original Mac engine backend.
+`Source/Backend.h` makes that choice per architecture, not per build machine.
+A build does not install anything automatically.
+
+`cmake/BuildTranslatedEngine.py` verifies the pinned BoxedWine archive, applies
+the published overrides, generates the headless SDL/BoxedWine Xcode project and
+builds the helper. The overrides add the exercised SSE3 instruction handling and
+bounded code-cache invalidation. Audio runtime stubs implement the private guest
+scheduling calls; they do not patch Roland code. The ARM helper uses only the
+`allow-jit` entitlement. Local file paths are removed from compiled diagnostics.
+
+The supplied Win32 guest is built from `Source/Translated/Guest.cpp`. To rebuild
+it, set `SCBRIDGE_GUEST_COMPILER` to an i686 MinGW C++ compiler. The default uses
+the matching bridge-built executable in MacRuntime; its complete source is in
+the same release. The guest protocol is shared with `Source/Protocol.h`.
+The release source archive also includes `Dependencies/RuntimeSources`: Wine,
+TinyCore userspace component source archives and their manifest/build references.
+The open-source runtime filesystem remains replaceable. Microsoft DLLs are
+obtained from the owner's engine installation or the verified Roland download,
+not from the bridge's packages.
+
+For the historical Rosetta-backed development path, configure with
+`-DSCBRIDGE_USE_TRANSLATED_ENGINE=OFF`. This is not the default 1.4 Apple Silicon
+release backend. `SCBRIDGE_MAC_ARCHITECTURES` can restrict front-end slices for
+development; the release default is `arm64;x86_64`.
 
 These bundles receive local ad-hoc signatures, not the official Developer ID.
 The release installer and automatic updater deliberately accept only the expected
 official signing identity and notarisation. A locally built installer therefore
 cannot be used as an official updater. For local development, test the bundles
 separately in a disposable host environment, without replacing a working install.
-On Apple Silicon, running the engine helper requires Rosetta and your own original
-Sound Canvas VA installation. No engine or ROM download is part of this build.
+Native Apple Silicon playback does not require Rosetta. Testing an Intel slice
+on Apple Silicon does require Rosetta; native Intel hardware remains a separate
+acceptance environment. Runtime engine setup is performed by the standalone,
+not during building or plug-in scanning.
 
 The public tests check controller/SysEx readback, insertion messages and type
 mappings, old/new scene migration and concurrent scene snapshots

@@ -14,6 +14,7 @@ public:
             bank[part]=0; map[part]=4;
             nrpnMsb[part]=nrpnLsb[part]=127;
             receive[part]={}; selectedMap[part]=4;
+            partModes[part]=part==9 ? 1 : 0;
         }
     }
     void observeShort(unsigned packed) {
@@ -53,6 +54,7 @@ public:
     void capture(EngineScene& scene) const {
         for(unsigned part=0;part<16;++part) for(unsigned i=1;i<15;++i)
             scene.legacy[part][i-1]=static_cast<uint8_t>(values[part][i]);
+        std::copy(partModes.begin(),partModes.end(),scene.partModes);
     }
     void observeLong(const uint8_t* data,uint32_t size) {
         if (size==6 && data[0]==0xf0 && data[1]==0x7e && (data[2]==0x7f || data[2]==0x10) && data[3]==9 &&
@@ -77,6 +79,7 @@ public:
             const auto block=b&15;
             const auto part=block==0 ? 9 : block<10 ? block-1 : block;
             if ((b&0x70)==0x10) {
+                if(c==0x15 && data[i]<=2) partModes[part]=data[i];
                 if(data[i]<=1) {
                     auto& rx=receive[part];const bool enabled=data[i]!=0;
                     switch(c) {
@@ -116,5 +119,6 @@ private:
     std::array<std::array<int32_t,legacyParameterCount>,16> values{};
     std::array<unsigned,16> bank{},map{},nrpnMsb{},nrpnLsb{};
     std::array<unsigned,16> selectedMap{};
+    std::array<uint8_t,16> partModes{};
 };
 }

@@ -3,10 +3,13 @@
 #include "Pipeline.h"
 #include "Performance.h"
 #include "EngineLocation.h"
+#include "EngineSetupPolicy.h"
 #include "TransientTooltip.h"
 #include "NumericSlider.h"
 #include "StandaloneEditor.h"
 #include "ControlHelp.h"
+#include "ProgramBrowser.h"
+#include "ProgramSelection.h"
 #ifdef _WIN32
 #include "WindowsIpc.h"
 #else
@@ -25,6 +28,7 @@ extern char** environ;
 #endif
 
 namespace {
+std::atomic<bool> engineSetupNoticeShown{false};
 void moduleAnchor() {}
 constexpr auto ids=[] { std::array<const char*,scbridge::parameterCount> value{};
     for(unsigned i=0;i<scbridge::parameterCount;++i) value[i]=scbridge::controls[i].id;return value; }();
@@ -88,12 +92,14 @@ class BridgeEditor final : public juce::AudioProcessorEditor, private juce::Time
 public:
     BridgeEditor(juce::AudioProcessor& p, juce::AudioProcessorValueTreeState& state,
                  std::function<juce::String()> statusText, std::function<int()> latencyValue,
-                 std::function<void(int)> changeLatency, std::function<bool()> advancedValue)
+                 std::function<void(int)> changeLatency, std::function<bool()> advancedValue,
+                 std::function<int()> programValue, std::function<bool(int)> selectProgram,
+                 std::function<bool()> rhythmValue)
         : AudioProcessorEditor(p), parameters(state), readStatus(std::move(statusText)), readLatency(std::move(latencyValue)),
-          readAdvanced(std::move(advancedValue)) {
+          readAdvanced(std::move(advancedValue)), readProgram(std::move(programValue)), readRhythm(std::move(rhythmValue)) {
         setName("Sound Canvas controls"); setTitle("Sound Canvas controls");
         tooltips.setComponentID("controlHelp");
-        setFocusContainerType(juce::Component::FocusContainerType::keyboardFocusContainer);
+        setFocusContainerType(juce::Component::FocusContainerType::focusContainer);
         for (unsigned i = 0; i < scbridge::parameterCount; ++i) {
             const bool isChoice=choiceControl(i), isSwitch=scbridge::controls[i].unit==scbridge::ControlUnit::Switch;
             auto& control=controlAt(i);
@@ -139,6 +145,36 @@ public:
         addAndMakeVisible(page);
         pageLabel.setText("Control page",juce::dontSendNotification);pageLabel.setAccessible(false);
         addAndMakeVisible(pageLabel);
+        browse.setComponentID("browsePresets");browse.setName("Browse presets");browse.setTitle("Browse presets");
+        browse.setButtonText("Presets...");browse.setExplicitFocusOrder(2);
+        browse.onClick=[this] {
+            browser.openAt(readProgram(),static_cast<int>(parameters.getRawParameterValue(ids[1])->load()),readRhythm());
+            showBrowser(true);
+        };
+        browse.getProperties().set(scbridge::explicitHelpProperty,
+            "Browse the named programs and drum kits by compatibility map. Loading a sound preserves mixer and effects settings and existing melodic/drum assignments.");
+        browse.setHelpText(scbridge::contextHelp(browse));browse.setTooltip(browse.getHelpText());
+        addAndMakeVisible(browse);
+        currentSound.setComponentID("currentSound");currentSound.setName("Current sound");currentSound.setTitle("Current sound");
+        currentSound.setWantsKeyboardFocus(true);currentSound.setExplicitFocusOrder(3);
+        currentSound.getProperties().set(scbridge::explicitHelpProperty,
+            "Up and Down load the previous or next named sound in the current map and sound type. Enter opens the searchable browser. F1 shows the selected sound's address.");
+        currentSound.setHelpText(scbridge::contextHelp(currentSound));currentSound.setTooltip(currentSound.getHelpText());
+        currentSound.onBrowse=[this] { browse.onClick(); };
+        currentSound.onDetails=[this] { browse.onClick();browser.keyPressed(juce::KeyPress(juce::KeyPress::F1Key)); };
+        currentSound.onChange=[this,selectProgram] {
+            const int selected=currentSound.getSelectedId()-1;
+            if(selected<0) return;
+            if(!selectProgram(selected)) juce::AccessibilityHandler::postAnnouncement("No suitable MIDI part is available for this sound.",juce::AccessibilityHandler::AnnouncementPriority::medium);
+            timerCallback();
+        };
+        addAndMakeVisible(currentSound);
+        browser.onLoad=[this,selectProgram](int index) {
+            if(selectProgram(index)) { timerCallback();showBrowser(false); }
+            else juce::AccessibilityHandler::postAnnouncement("No suitable MIDI part is available for this sound.",juce::AccessibilityHandler::AnnouncementPriority::medium);
+        };
+        browser.onClose=[this] { showBrowser(false); };
+        addChildComponent(browser);
         status.setComponentID("engineStatus"); status.setName("Engine status"); status.setTitle("Engine status");
         latency.setComponentID("bridgeLatency"); latency.setName("Bridge latency"); latency.setTitle("Bridge latency");
         auto help = "Default bridge latency shared by the standalone app and "
@@ -210,12 +246,15 @@ public:
         sliders[0].setVisible(false);addAndMakeVisible(partScope);showPage();
     }
     void resized() override {
-        pageLabel.setBounds(12,10,200,30);page.setBounds(214,10,getWidth()-226,30);
-        const int rowHeight=std::min(36,(getHeight()-180)/16);
+        browser.setBounds(getLocalBounds());
+        pageLabel.setBounds(12,10,120,30);page.setBounds(142,10,getWidth()-280,30);
+        browse.setBounds(getWidth()-126,10,114,30);
+        currentSound.setBounds(12,44,getWidth()-24,28);
+        const int rowHeight=std::min(36,(getHeight()-212)/16);
         int row=0;
         for (unsigned i = 0; i < scbridge::parameterCount; ++i) {
             if(!labels[i].isVisible()) continue;
-            int y = 48 + row++ * rowHeight;
+            int y = 80 + row++ * rowHeight;
             labels[i].setBounds(12, y, 200, 30);controlAt(i).setBounds(214,y,getWidth()-226,30);
         }
         latencyLabel.setBounds(12, getHeight()-134, 200, 30); latency.setBounds(214, getHeight()-134, getWidth() - 226, 30);
@@ -235,7 +274,10 @@ private:
         else return false;
         // The request-only display deliberately has no selected menu item, so
         // remember its position separately instead of nudging ComboBox's zero ID.
-        if(next!=lastRequestedMap) choices[1].setSelectedId(next,juce::sendNotificationSync);
+        if(next!=lastRequestedMap) {
+            choices[1].setSelectedId(next,juce::sendNotificationSync);
+            choices[1].announceKeyboardValue();
+        }
         return true;
     }
     juce::Component& controlAt(unsigned i) {
@@ -245,6 +287,7 @@ private:
         return sliders[i];
     }
     void showPage() {
+        if(browser.isVisible()) return;
         const int selected=page.getSelectedId();
         for(unsigned i=0;i<scbridge::parameterCount;++i) {
             const bool visible=selected==1 ? i<16 : selected==2 ? i>=16 && i<24 :
@@ -256,12 +299,33 @@ private:
                 i>=scbridge::insertionFirstDirectIndex+10;
             labels[i].setVisible(visible);
             auto& control=controlAt(i);control.setVisible(visible);
-            control.setExplicitFocusOrder(static_cast<int>(i+2));
+            control.setExplicitFocusOrder(static_cast<int>(i+4));
         }
         resized();
     }
     void timerCallback() override {
         updateEnabledControls();
+        const int selected=readProgram();
+        const int map=static_cast<int>(parameters.getRawParameterValue(ids[1])->load());
+        const bool drums=readRhythm();
+        if(map!=selectorMap || drums!=selectorDrums) {
+            selectorMap=map;selectorDrums=drums;
+            currentSound.clear(juce::dontSendNotification);
+            for(size_t i=0;i<scbridge::catalogueCount;++i) {
+                const auto& entry=scbridge::programCatalogue[i];
+                if(entry.map==map && entry.drums==drums) currentSound.addItem(entry.name,static_cast<int>(i+1));
+            }
+        }
+        juce::String name;
+        if(const auto* entry=scbridge::programAt(static_cast<size_t>(selected))) name=entry->name;
+        else name="Unlisted sound: "+juce::String(scbridge::mapName(static_cast<int>(parameters.getRawParameterValue(ids[1])->load())).data())+
+            ", bank "+juce::String(static_cast<int>(parameters.getRawParameterValue(ids[2])->load()))+
+            ", program "+juce::String(static_cast<int>(parameters.getRawParameterValue(ids[3])->load())+1);
+        if(name!=currentSound.getText() || currentSound.getSelectedId()!=selected+1) {
+            if(selected>=0) currentSound.setSelectedId(selected+1,juce::dontSendNotification);
+            else currentSound.setText(name,juce::dontSendNotification);
+            if(auto* handler=currentSound.getAccessibilityHandler()) handler->notifyAccessibilityEvent(juce::AccessibilityEvent::valueChanged);
+        }
         if(mapAll && !allParts) partScope.setSelectedId(static_cast<int>(sliders[0].getValue())+2,juce::dontSendNotification);
         auto* focus = juce::Component::getCurrentlyFocusedComponent();
         if (!latency.isMouseButtonDown() && !(focus && latency.isParentOf(focus)))
@@ -273,28 +337,52 @@ private:
             handler->notifyAccessibilityEvent(juce::AccessibilityEvent::valueChanged);
     }
     void updateEnabledControls() {
+        browse.setEnabled(!allParts);
+        currentSound.setEnabled(!allParts);
         for(unsigned i=0;i<scbridge::parameterCount;++i) {
             const auto scope=scbridge::controls[i].scope;
             const bool perPart=(i>=2 && i<scbridge::legacyParameterCount) || scope==scbridge::ControlScope::Part;
             controlAt(i).setEnabled((i<scbridge::legacyParameterCount || readAdvanced()) && !(allParts && perPart));
         }
     }
+    void showBrowser(bool visible) {
+        if(visible) {
+            browserHidden.clear();
+            for(auto* child:getChildren()) if(child!=&browser && child->isVisible()) {
+                browserHidden.emplace_back(child);child->setVisible(false);
+            }
+        } else {
+            for(auto& child:browserHidden) if(child) child->setVisible(true);
+            browserHidden.clear();
+        }
+        browser.setVisible(visible);
+        if(visible) { browser.toFront(false);browser.focusSearch(); }
+        else { showPage();browse.grabKeyboardFocus(); }
+    }
     juce::AudioProcessorValueTreeState& parameters;
     std::function<void(int)> mapAll;
-    juce::ComboBox partScope;
+    scbridge::KeyboardChoice partScope;
     bool allParts=false;
     int lastRequestedMap=0;
     std::function<juce::String()> readStatus;
     std::function<int()> readLatency;
     std::function<bool()> readAdvanced;
-    juce::ComboBox page;
+    std::function<int()> readProgram;
+    std::function<bool()> readRhythm;
+    scbridge::ProgramBrowser browser;
+    juce::TextButton browse;
+    scbridge::PresetSelector currentSound;
+    int selectorMap=0;
+    bool selectorDrums=false;
+    std::vector<juce::Component::SafePointer<juce::Component>> browserHidden;
+    scbridge::KeyboardChoice page;
     juce::Label pageLabel;
     scbridge::TransientTooltip tooltips{this, 700};
     KeyboardSlider latency;
     juce::Label latencyLabel;
     std::array<KeyboardSlider, scbridge::parameterCount> sliders;
     std::array<juce::Label, scbridge::parameterCount> labels;
-    std::array<juce::ComboBox, scbridge::parameterCount> choices;
+    std::array<scbridge::KeyboardChoice, scbridge::parameterCount> choices;
     std::array<juce::ToggleButton, scbridge::parameterCount> toggles;
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>, scbridge::parameterCount> choiceAttachments;
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>, scbridge::parameterCount> buttonAttachments;
@@ -340,10 +428,28 @@ public:
     bool isBusesLayoutSupported(const BusesLayout& value) const override {
         return value.getMainOutputChannelSet() == juce::AudioChannelSet::stereo();
     }
-    int getNumPrograms() override { return 1; }
-    int getCurrentProgram() override { return 0; }
-    void setCurrentProgram(int) override {}
-    const juce::String getProgramName(int) override { return "Pilot"; }
+    int getNumPrograms() override {
+        // VST3 root programs intercept channel PCs; AU's flat list stalls large
+        // menus. Grouped native preset files provide the host-side catalogue.
+        if(wrapperType==wrapperType_AudioUnit) return 0;
+        return wrapperType==wrapperType_VST3 ? 1 : static_cast<int>(scbridge::catalogueCount);
+    }
+    int getCurrentProgram() override {
+        if(flatHostProgram()) return 0;
+        const int index=catalogueProgram();return index>=0 ? index : lastFactoryProgram.load();
+    }
+    void setCurrentProgram(int index) override {
+        if(!flatHostProgram()) selectFactoryProgram(index);
+    }
+    const juce::String getProgramName(int index) override {
+        if(flatHostProgram()) {
+            if(index!=0) return {};
+            const auto* entry=scbridge::programAt(static_cast<size_t>(catalogueProgram()));
+            return entry ? juce::String(entry->name) : juce::String("Current sound");
+        }
+        const auto* entry=scbridge::programAt(static_cast<size_t>(index));
+        return entry ? juce::String(scbridge::programHostName(*entry)) : juce::String();
+    }
     void changeProgramName(int, const juce::String&) override {}
     bool hasEditor() const override { return true; }
     juce::AudioProcessorEditor* createEditor() override {
@@ -358,9 +464,11 @@ public:
                     "; realtime scheduling worker/helper: " + (workerRealtime.load() ? "yes" : "no") +
                     "/" + (helperRealtime.load() ? "yes" : "no") +
                     (advancedReady.load() ? ". Advanced controls ready." : ". Advanced controls unavailable for this engine build.") +
-                    (preferenceError.load() ? ". Could not save the default latency." : "");
+                    (preferenceError.load() ? ". Could not save the default latency." : "")+
+                    (factorySelectionRejected.load() ? ". Preset selection cancelled: the MIDI part assignment changed." : "");
                 case 2: return juce::String("Engine stopped responding. Unload and reload the instrument.");
-                case 3: return juce::String("Sound Canvas engine or bridge helper is missing.");
+                case 3: return juce::String("Sound Canvas engine is missing. ")+scbridge::engineSetupGuidance;
+                case 5: return juce::String("The bridge playback helper is missing. Repair the Sound Canvas Bridge installation.");
                 case 4: return juce::String("Could not start the Sound Canvas bridge.");
                 default: return juce::String("Waiting for the host to start audio.");
             }
@@ -372,13 +480,20 @@ public:
             if (saved) CFNotificationCenterPostNotification(CFNotificationCenterGetDistributedCenter(), preferenceNotification,
                                                             nullptr, nullptr, true);
 #endif
-        }, [this] { return advancedReady.load(); });
+        }, [this] { return advancedReady.load(); }, [this] { return catalogueProgram(); },
+           [this](int index) { return selectFactoryProgram(index); },
+           [this] { return scbridge::rhythmPart(rhythmParts.load(),static_cast<int>(std::lround(values[0]->load()))); });
     }
     void prepareToPlay(double rate, int maximum) override {
         releaseResources();
+        if(factoryRequested.load()!=factoryAcknowledged.load()) factorySent.store(0);
+        rhythmParts.store(scbridge::defaultRhythmParts);
         scbridge::StateFrame previousFrame;
         if(capturedState.read(previousFrame) && previousFrame.sceneValid && previousFrame.epoch==stateEpoch.load())
             restoredState.publish(previousFrame);
+        scbridge::StateFrame roleFrame;
+        if(restoredState.read(roleFrame) && roleFrame.sceneValid)
+            rhythmParts.store(scbridge::sceneRhythmParts(roleFrame.scene));
         capturedState.clear();
         publishControls(true);
         for (auto& item : feedback) item.store(0);
@@ -404,7 +519,8 @@ public:
         const auto directory=juce::File(juce::String(path)).getParentDirectory();
         auto helper=directory.getParentDirectory().getChildFile("Resources/SoundCanvasHelper.exe");
         if(!helper.existsAsFile()) helper=directory.getChildFile("SoundCanvasHelper.exe");
-        if(!core.existsAsFile() || !helper.existsAsFile()) { engineStatus.store(3);return; }
+        if(!core.existsAsFile()) { engineStatus.store(3);return; }
+        if(!helper.existsAsFile()) { engineStatus.store(5);return; }
         if(!windowsIpc.start(helper.getFullPathName().toWideCharPointer(),core.getFullPathName().toWideCharPointer())) return;
         shared=windowsIpc.shared();
 #else
@@ -412,7 +528,8 @@ public:
         if (!dladdr(reinterpret_cast<void*>(&moduleAnchor), &module) || !module.dli_fname) return;
         auto helper = juce::File(juce::String::fromUTF8(module.dli_fname)).getParentDirectory()
                           .getParentDirectory().getChildFile("Resources/SoundCanvasHelper");
-        if (!core.existsAsFile() || !helper.existsAsFile()) { engineStatus.store(3); return; }
+        if(!core.existsAsFile()) { engineStatus.store(3);return; }
+        if(!helper.existsAsFile()) { engineStatus.store(5);return; }
         // Darwin limits POSIX shared-memory names to 31 bytes including terminator.
         auto memoryName = "/onjsc-" + juce::Uuid().toString().removeCharacters("-").substring(0, 20);
         memory = shm_open(memoryName.toRawUTF8(), O_CREAT | O_EXCL | O_RDWR, 0600);
@@ -460,6 +577,7 @@ public:
 #else
         if(!exchange('S',5000)) { releaseResources();return; }
 #endif
+        rhythmParts.store(scbridge::sceneRhythmParts(shared->capturedScene));
         inputs.reset(); outputs.reset(); inputReady.reset(); outputReady.reset(); pending = {}; timeline = 0; gaps.store(0);
         missingSamples.store(0); lastBlock.store(0); lastOffline.store(false);
         healthy.store(true); resetRequested.store(false); engineStatus.store(1);
@@ -500,7 +618,14 @@ public:
         juce::ScopedNoDenormals guard;
         auto frames = static_cast<uint32_t>(audio.getNumSamples());
         audio.clear();
-        if (!healthy.load() || frames > scbridge::maxFrames || !frames) { midi.clear(); return; }
+        if (!healthy.load() || frames > scbridge::maxFrames || !frames) {
+            const bool hosted=wrapperType==wrapperType_VST3 || wrapperType==wrapperType_AudioUnit;
+            if(hosted && !isNonRealtime() && engineStatus.load()==3 && !engineSetupNoticeShown.load()) for(const auto item:midi)
+                if(scbridge::requestEngineSetupNotice(hosted,isNonRealtime(),engineStatus.load()==3,item.data,item.numBytes)) {
+                    engineSetupPending.store(true);break;
+                }
+            midi.clear();return;
+        }
         const bool offline = isNonRealtime();
         lastBlock.store(static_cast<int>(frames)); lastOffline.store(offline);
         uint32_t callbackMissing = 0;
@@ -526,6 +651,7 @@ public:
             if (offset == scbridge::renderQuantum - 1 && !input && !allowDrop) return false;
             if (offset == 0) {
                 pending.start = sourceTime; pending.count = pending.bytes = 0;
+                pendingFactory=factoryRequested.load();pending.factoryRequest=0;
                 pending.reset = resetRequested.exchange(false) ? 1 : 0;
                 pending.stateEpoch=stateEpoch.load();
                 pending.restoreSceneValid=0;
@@ -554,9 +680,12 @@ public:
             }
             if (offset == scbridge::renderQuantum - 1) {
                 if (input) {
+                    queueFactorySelection();
                     input->start = pending.start; input->count = pending.count; input->bytes = pending.bytes; input->reset = pending.reset;
                     input->restoreSceneValid=pending.restoreSceneValid;
                     input->stateEpoch=pending.stateEpoch;
+                    input->factoryRequest=pending.factoryRequest;
+                    std::copy(std::begin(pending.factoryExpected),std::end(pending.factoryExpected),std::begin(input->factoryExpected));
                     if(pending.restoreSceneValid) input->restoredScene=pending.restoredScene;
                     std::copy(std::begin(pending.parameters), std::end(pending.parameters), std::begin(input->parameters));
                     std::copy(std::begin(pending.generations), std::end(pending.generations), std::begin(input->generations));
@@ -620,8 +749,10 @@ public:
     }
     void getStateInformation(juce::MemoryBlock& destination) override {
         auto xml = state.copyState().createXml();
+        const auto selection=factoryRequested.load();
         scbridge::StateFrame snapshot;
         const bool haveSnapshot=capturedState.read(snapshot) && snapshot.epoch==stateEpoch.load();
+        const bool pendingSelection=selection && selection!=(haveSnapshot ? snapshot.factoryRequest : factoryAcknowledged.load());
         for(auto* child=xml->getFirstChildElement();child;) {
             auto* next=child->getNextElement();
             const auto id=child->getStringAttribute("id");
@@ -631,8 +762,11 @@ public:
                 }
                 const auto command=commands[i].load(),report=haveSnapshot ?
                     scbridge::packControl(snapshot.generations[i],snapshot.values[i]) : feedback[i].load();
-                const auto value=currentReport(i,report,command)
-                    ? scbridge::controlValue(report) : scbridge::controlValue(command);
+                const auto* requested=scbridge::programAt(static_cast<size_t>(scbridge::programRequestIndex(selection)));
+                const int selectionValues[]{scbridge::programRequestPart(selection),requested ? requested->map : 4,
+                    requested ? requested->bank : 0,requested ? requested->program : 0};
+                const auto value=pendingSelection && i<4 ? selectionValues[i] :
+                    currentReport(i,report,command) ? scbridge::controlValue(report) : scbridge::controlValue(command);
                 child->setAttribute("value",value);break;
             }
             child=next;
@@ -641,8 +775,13 @@ public:
         if(haveSnapshot) savedScene=snapshot;
         else restoredState.read(savedScene);
         if(savedScene.sceneValid) {
-            auto* scene=xml->createNewChildElement("BridgeScene");scene->setAttribute("version",static_cast<int>(scbridge::sceneVersion));
-            scene->addTextElement(juce::MemoryBlock(&savedScene.scene,sizeof(savedScene.scene)).toBase64Encoding());
+            auto* scene=xml->createNewChildElement("BridgeScene");scene->setAttribute("version",static_cast<int>(scbridge::encodedSceneVersion(savedScene.scene)));
+            scene->addTextElement(juce::MemoryBlock(&savedScene.scene,scbridge::encodedSceneSize(savedScene.scene)).toBase64Encoding());
+        }
+        if(pendingSelection) {
+            auto* pendingProgram=xml->createNewChildElement("PendingProgram");
+            pendingProgram->setAttribute("index",scbridge::programRequestIndex(selection));
+            pendingProgram->setAttribute("part",scbridge::programRequestPart(selection));
         }
         copyXmlToBinary(*xml, destination);
     }
@@ -650,6 +789,12 @@ public:
         if (size <= 0 || size > 65536) return;
         auto xml = getXmlFromBinary(data, size);
         if (xml && xml->hasTagName(state.state.getType())) {
+            int pendingIndex=-1,pendingPart=-1;
+            if(auto* saved=xml->getChildByName("PendingProgram")) {
+                pendingIndex=saved->getIntAttribute("index",-1);pendingPart=saved->getIntAttribute("part",-1);
+                if(!scbridge::programAt(static_cast<size_t>(pendingIndex)) || pendingPart<0 || pendingPart>=16) return;
+                xml->removeChildElement(saved,true);
+            }
             scbridge::StateFrame restored;
             if(auto* saved=xml->getChildByName("BridgeScene")) {
                 juce::MemoryBlock bytes;
@@ -659,6 +804,8 @@ public:
                 xml->removeChildElement(saved,true);
             }
             restored.epoch=stateEpoch.fetch_add(1)+1;
+            factoryRequested.cancel();
+            rhythmParts.store(restored.sceneValid ? scbridge::sceneRhythmParts(restored.scene) : scbridge::defaultRhythmParts);
             restoredState.publish(restored);capturedState.clear();
             auto next = juce::ValueTree::fromXml(*xml);
             const auto prior=reflecting;reflecting=this;
@@ -675,9 +822,54 @@ public:
             }
             reflecting=prior;
             publishControls();feedbackAvailable.store(false);resetRequested.store(true);
+            if(pendingIndex>=0) selectFactoryProgram(pendingIndex,pendingPart);
         }
     }
 private:
+    bool flatHostProgram() const { return wrapperType==wrapperType_VST3 || wrapperType==wrapperType_AudioUnit; }
+    struct FactoryTransaction {
+        uint64_t request=0,start=0;
+        uint32_t epoch=0;
+        std::array<uint64_t,4> expected{};
+    };
+    int catalogueProgram() const {
+        const auto selection=factoryRequested.load();
+        if(selection && selection!=factoryAcknowledged.load()) return scbridge::programRequestIndex(selection);
+        const int part=static_cast<int>(std::lround(values[0]->load()));
+        const auto* entry=scbridge::findProgram(static_cast<int>(std::lround(values[1]->load())),
+            static_cast<int>(std::lround(values[2]->load())),static_cast<int>(std::lround(values[3]->load())),
+            scbridge::rhythmPart(rhythmParts.load(),part));
+        return entry ? static_cast<int>(entry-scbridge::programCatalogue) : -1;
+    }
+    bool selectFactoryProgram(int index,int forcedPart=-1) {
+        const auto* entry=scbridge::programAt(static_cast<size_t>(index));
+        if(!entry) return false;
+        const auto modes=rhythmParts.load();
+        const int part=forcedPart>=0 ? forcedPart : scbridge::programPart(modes,
+            static_cast<int>(std::lround(values[0]->load())),entry->drums);
+        if(part<0 || part>=16 || scbridge::rhythmPart(modes,part)!=entry->drums) return false;
+        const int selection[]{part,entry->map,entry->bank,entry->program};
+        // Reserve before notifications so intervening automation can cancel it.
+        const auto reserved=factoryRequested.reserve(index,part);
+        const auto previous=reflecting;reflecting=this;
+        for(unsigned i=0;i<4;++i) {
+            if(factoryRequested.load()!=reserved) break;
+            auto* parameter=state.getParameter(ids[i]);
+            parameter->setValueNotifyingHost(parameter->convertTo0to1(static_cast<float>(selection[i])));
+        }
+        reflecting=previous;
+        if(!factoryRequested.commit(reserved)) return false;
+        factorySelectionRejected.store(false);
+        lastFactoryProgram.store(index);factoryDisplayDirty.store(true);
+        return true;
+    }
+    void queueFactorySelection() {
+        if(!(pendingFactory&scbridge::programRequestReady) || pendingFactory==factorySent.load() || pendingFactory!=factoryRequested.load()) return;
+        const auto* entry=scbridge::programAt(static_cast<size_t>(scbridge::programRequestIndex(pendingFactory)));
+        if(!entry) { factoryRequested.cancelIf(pendingFactory);return; }
+        if(scbridge::queueProgramSelection(pending,pendingFactory,entry->map,entry->bank,entry->program))
+            factorySent.store(pendingFactory);
+    }
     void publishControl(unsigned index,int32_t value) {
         auto previous=commands[index].load();
         while (!commands[index].compare_exchange_weak(previous,
@@ -686,13 +878,16 @@ private:
     void publishControls(bool includeAdvanced=false) {
         std::array<int32_t,scbridge::parameterCount> next{};
         std::array<bool,scbridge::parameterCount> publish{};
+        const auto selection=factoryRequested.load();
+        const bool pendingSelection=selection && selection!=factoryAcknowledged.load();
         // Resolve the whole snapshot before advancing selector generations;
         // otherwise later fields would reject their still-current readback.
         for (unsigned i=0;i<scbridge::parameterCount;++i) {
             if(i>=scbridge::legacyParameterCount && (!includeAdvanced || !advancedPersistent[i].load())) continue;
             const auto command=commands[i].load(),report=feedback[i].load();
             next[i]=includeAdvanced && currentReport(i,report,command)
-                ? scbridge::controlValue(report) : static_cast<int32_t>(std::lround(values[i]->load()));
+                ? scbridge::controlValue(report) : pendingSelection && i<4
+                    ? scbridge::controlValue(command) : static_cast<int32_t>(std::lround(values[i]->load()));
             publish[i]=true;
         }
         for(unsigned i=0;i<scbridge::parameterCount;++i) if(publish[i]) publishControl(i,next[i]);
@@ -700,6 +895,7 @@ private:
     void parameterChanged(const juce::String& id,float value) override {
         if (reflecting==this) return;
         for (unsigned i=0;i<scbridge::parameterCount;++i) if (id==ids[i]) {
+            if(i<4) { factoryRequested.cancel();factoryDisplayDirty.store(true); }
             if (i>=1 && i<=3) publishControls();
             else {
                 if(i>=scbridge::legacyParameterCount) advancedPersistent[i].store(true);
@@ -709,6 +905,8 @@ private:
         }
     }
     void timerCallback() override {
+        if(engineSetupPending.exchange(false) && engineStatus.load()==3 && !engineSetupNoticeShown.exchange(true))
+            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Sound Canvas engine setup",scbridge::engineSetupGuidance);
 #ifdef _WIN32
         if(++preferenceTicks>=10) {
             preferenceTicks=0;preferences.reload();requestedLatency.store(preferences.getLatency());
@@ -716,19 +914,32 @@ private:
 #endif
         auto latency = actualLatency.load();
         if (getLatencySamples() != latency) setLatencySamples(latency);
+        const auto selection=factoryRequested.load();
+        const int actualPart=scbridge::controlValue(commands[0].load());
+        if((!selection || selection==factoryAcknowledged.load()) && static_cast<int>(std::lround(values[0]->load()))!=actualPart) {
+            const auto prior=reflecting;reflecting=this;
+            auto* parameter=state.getParameter(ids[0]);
+            parameter->setValueNotifyingHost(parameter->convertTo0to1(static_cast<float>(actualPart)));
+            reflecting=prior;
+        }
         for (unsigned i=1;i<scbridge::parameterCount;++i) {
             if(i==15) continue;
+            const auto selection=factoryRequested.load();
+            if(i<4 && selection && selection!=factoryAcknowledged.load()) continue;
             const auto report=feedback[i].load();
             if (!currentReport(i,report,commands[i].load())) continue;
             auto* parameter=state.getParameter(ids[i]);
             const auto value=static_cast<float>(scbridge::controlValue(report));
             if (values[i]->load()==value) continue;
+            if(i<4) factoryDisplayDirty.store(true);
             // Readbacks notify the editor/host, but must not become new MIDI
             // commands. The guard is thread-local so DAW edits remain commands.
             const auto previous=reflecting; reflecting=this;
             parameter->setValueNotifyingHost(parameter->convertTo0to1(value));
             reflecting=previous;
         }
+        if(factoryDisplayDirty.exchange(false))
+            updateHostDisplay(juce::AudioProcessor::ChangeDetails{}.withProgramChanged(true));
     }
     bool currentReport(unsigned index,uint64_t report,uint64_t command) const {
         if(!feedbackAvailable.load() || feedbackEpoch.load()!=stateEpoch.load() ||
@@ -754,6 +965,9 @@ private:
     void run() override {
         workerRealtime.store(scbridge::configureAudioWorker(currentRate.load()));
         helperRealtime.store(shared->helperRealtime != 0);
+        uint64_t completedFactory=factoryAcknowledged.load();
+        uint16_t engineRhythm=scbridge::sceneRhythmParts(shared->capturedScene);
+        scbridge::ProgramPartState partState;
         while (!threadShouldExit()) {
             auto* input = inputs.beginRead();
             auto* output = outputs.beginWrite();
@@ -769,8 +983,27 @@ private:
             std::copy(std::begin(input->parameters), std::end(input->parameters), std::begin(shared->parameters));
             std::copy(std::begin(input->generations),std::end(input->generations),std::begin(shared->generations));
             const auto start = input->start;
+            auto effectivePart=partState.resolve(input->stateEpoch,
+                scbridge::packControl(input->generations[0],input->parameters[0]));
+            FactoryTransaction transaction;
+            bool applyFactory=false;
+            if(input->factoryRequest) {
+                transaction.request=input->factoryRequest;transaction.start=start;transaction.epoch=input->stateEpoch;
+                std::copy(std::begin(input->factoryExpected),std::end(input->factoryExpected),transaction.expected.begin());
+                const auto* entry=scbridge::programAt(static_cast<size_t>(scbridge::programRequestIndex(transaction.request)));
+                const auto roles=scbridge::programRolesBeforePacket(*input,engineRhythm,shared->advancedReady!=0);
+                const int part=scbridge::programRequestPart(transaction.request);
+                applyFactory=entry && scbridge::rhythmPart(roles,part)==entry->drums && transaction.epoch==stateEpoch.load() &&
+                    partState.commit(transaction.epoch,part,commands[0],effectivePart);
+                if(applyFactory) transaction.expected[0]=effectivePart;
+                if(!applyFactory && factoryRequested.cancelIf(transaction.request)) {
+                    factorySelectionRejected.store(true);factoryDisplayDirty.store(true);
+                }
+            }
+            shared->parameters[0]=scbridge::controlValue(effectivePart);
+            shared->generations[0]=scbridge::controlGeneration(effectivePart);
             const auto latencyQuanta = std::max(1u, static_cast<uint32_t>(actualLatency.load()) / scbridge::renderQuantum);
-            const auto limit = std::min({scbridge::maximumBatchQuanta, outputs.writable(), latencyQuanta});
+            const auto limit = std::min({input->factoryRequest ? 1u : scbridge::maximumBatchQuanta, outputs.writable(), latencyQuanta});
             uint32_t packets = 0;
             // Use packets already queued; never wait to fill a batch. Preserve
             // parameter/reset boundaries and every original MIDI sample offset.
@@ -778,12 +1011,15 @@ private:
                 auto* next = inputs.beginRead(packets);
                 if (!next || next->start != start + packets * scbridge::renderQuantum ||
                     (packets && next->reset) ||
+                    (packets && next->factoryRequest) ||
                     next->stateEpoch!=shared->stateEpoch ||
-                    !std::equal(std::begin(next->parameters), std::end(next->parameters), shared->parameters) ||
-                    !std::equal(std::begin(next->generations),std::end(next->generations),shared->generations) ||
+                    (packets && (partState.resolve(next->stateEpoch,scbridge::packControl(next->generations[0],next->parameters[0]))!=effectivePart ||
+                        !std::equal(std::begin(next->parameters)+1,std::end(next->parameters),shared->parameters+1) ||
+                        !std::equal(std::begin(next->generations)+1,std::end(next->generations),shared->generations+1))) ||
                     shared->eventCount + next->count > scbridge::maxEvents ||
                     shared->midiBytes + next->bytes > scbridge::maxMidiBytes) break;
                 for (uint32_t i = 0; i < next->count; ++i) {
+                    if(next->factoryRequest && !applyFactory && i<scbridge::programSelectionEventCount) continue;
                     const auto& event = next->events[i];
                     shared->events[shared->eventCount++] = {
                         packets * scbridge::renderQuantum + event.offset, event.size,
@@ -795,6 +1031,18 @@ private:
             }
             shared->frames = packets * scbridge::renderQuantum;
             if (!exchange('P', 250)) { healthy.store(false); engineStatus.store(2); return; }
+            if(applyFactory && transaction.epoch==shared->stateEpoch &&
+               transaction.start>=start && transaction.start<start+shared->frames) {
+                if(transaction.epoch==stateEpoch.load() && commands[0].load()==transaction.expected[0]) {
+                    for(unsigned i=1;i<4;++i) {
+                        auto expected=transaction.expected[i];
+                        if(scbridge::controlGeneration(expected)==shared->generations[i])
+                            commands[i].compare_exchange_strong(expected,
+                                scbridge::packControl(shared->generations[i],shared->reported[i]));
+                    }
+                }
+                completedFactory=transaction.request;
+            }
             advancedReady.store(shared->advancedReady!=0);
             for (unsigned i=0;i<scbridge::parameterCount;++i)
                 feedback[i].store(scbridge::packControl(shared->generations[i],shared->reported[i]));
@@ -802,10 +1050,15 @@ private:
             feedbackEpoch.store(shared->stateEpoch);
             scbridge::StateFrame frame;
             frame.epoch=shared->stateEpoch;
+            frame.factoryRequest=completedFactory;
             frame.sceneValid=shared->capturedSceneValid;frame.scene=shared->capturedScene;
+            engineRhythm=scbridge::sceneRhythmParts(frame.scene);
             std::copy(std::begin(shared->generations),std::end(shared->generations),std::begin(frame.generations));
             std::copy(std::begin(shared->reported),std::end(shared->reported),std::begin(frame.values));
-            if(frame.epoch==stateEpoch.load()) capturedState.publish(frame);
+            if(frame.epoch==stateEpoch.load() && capturedState.publish(frame)) {
+                rhythmParts.store(engineRhythm);
+                if(factoryAcknowledged.exchange(completedFactory)!=completedFactory) factoryDisplayDirty.store(true);
+            }
             for (uint32_t i = 0; i < packets; ++i) {
                 output = outputs.beginWrite();
                 output->start = start + i * scbridge::renderQuantum;
@@ -927,6 +1180,13 @@ private:
     std::array<std::atomic<bool>,scbridge::parameterCount> advancedPersistent{};
     std::atomic<bool> feedbackAvailable{false},advancedReady{false};
     std::atomic<uint32_t> stateEpoch{1},feedbackEpoch{0};
+    std::atomic<uint16_t> rhythmParts{scbridge::defaultRhythmParts};
+    scbridge::ProgramRequests factoryRequested;
+    std::atomic<uint64_t> factorySent{0},factoryAcknowledged{0};
+    std::atomic<int> lastFactoryProgram{0};
+    std::atomic<bool> factoryDisplayDirty{false};
+    std::atomic<bool> factorySelectionRejected{false};
+    uint64_t pendingFactory=0;
     scbridge::StateMailbox<scbridge::StateFrame> capturedState,restoredState;
     inline static thread_local Processor* reflecting=nullptr;
     scbridge::Shared* shared = nullptr;
@@ -939,6 +1199,7 @@ private:
     std::atomic<bool> healthy{false};
     std::atomic<bool> workerRealtime{false}, helperRealtime{false};
     std::atomic<int> engineStatus{0};
+    std::atomic<bool> engineSetupPending{false};
     std::atomic<uint32_t> gaps{0};
     std::atomic<uint64_t> missingSamples{0};
     std::atomic<int> lastBlock{0};

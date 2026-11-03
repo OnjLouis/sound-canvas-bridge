@@ -4,12 +4,44 @@
 #include <stdexcept>
 #include <set>
 #include "AudioStartupFixture.h"
+#include "PreferencesStartupFixture.h"
 
-int main() {
+int main(int argc,char** argv) {
     juce::ScopedJuceInitialiser_GUI gui;
     try {
         auto require=[](bool ok,const char* text){if(!ok) throw std::runtime_error(text);};
+#if defined(SCBRIDGE_TRANSLATED_ENGINE) && !defined(_WIN32)
+        if(argc==2 && std::string(argv[1])=="--download-flow") {
+            const auto root=scbridge::performanceFile().getParentDirectory();
+            require(root.getFileName()=="engine-download-test-profile" && !root.exists(),"Expected fresh isolated download profile");
+            require(root.createDirectory().wasOk(),"Create download profile");
+            const auto setting=root.getChildFile("Engine.xml");setting.replaceWithText("<PROPERTIES><VALUE name=\"unchanged\" val=\"yes\"/></PROPERTIES>");
+            const auto original=setting.loadFileAsString();
+            scbridge::EngineDownloadService download;
+            for(bool cancel:{true,false}) {
+                bool done=false,success=false;juce::String message;juce::File installed;
+                download.start([&](juce::Result result,juce::File file) {success=result.wasOk();message=result.getErrorMessage();installed=file;done=true;});
+                if(cancel) download.cancel();
+                const auto deadline=juce::Time::getMillisecondCounterHiRes()+190000;
+                while(!done && juce::Time::getMillisecondCounterHiRes()<deadline)
+                    juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+                require(done,"Download completion must be bounded");
+                while(download.busy() && juce::Time::getMillisecondCounterHiRes()<deadline)
+                    juce::MessageManager::getInstance()->runDispatchLoopUntil(5);
+                require(!download.busy(),"Download worker must exit before retry");
+                require(setting.loadFileAsString()==original,"Download service must not replace the active selection");
+                if(cancel) require(!success && message.contains("cancelled"),"Cancellation preserves the current engine");
+                else {
+                    require(success && scbridge::engineHashMatches(installed,scbridge::officialCoreHash),"Native Mac download/extract/import must produce the verified DLL");
+                    require(scbridge::engineHashMatches(installed.getSiblingFile("MSVCR100.dll"),"60c06e0fa4449314da3a0a87c1a9d9577df99226f943637e06f61188e5862efa"),"Native Mac download must include its verified external engine runtime");
+                }
+            }
+            require(root.deleteRecursively(),"Remove completed isolated download profile");
+            std::cout<<"PASS native download service cancellation, retry, import and unchanged active selection\n";return 0;
+        }
+#endif
         audioStartupFixture::run(require);
+        preferencesStartupFixture::run(require);
         {
             juce::AudioDeviceManager devices;
             scbridge::AppPreferences preferences;
@@ -44,6 +76,21 @@ int main() {
             require(tabs->getCurrentTabIndex()==1 && audio->hasKeyboardFocus(false),"Right Arrow must select and focus Audio and MIDI");
             settings.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::leftKey));
             require(tabs->getCurrentTabIndex()==0 && general->hasKeyboardFocus(false),"Left Arrow must select and focus General");
+#if defined(SCBRIDGE_TRANSLATED_ENGINE) && !defined(_WIN32)
+            tabs->setCurrentTabIndex(0);
+            auto* page=tabs->getCurrentContentComponent();
+            auto* engine=page->findChildWithID("enginePreferences");
+            require(engine!=nullptr,"Engine setup must live in General on Mac");
+            require(!tabs->getTabContentComponent(1)->findChildWithID("engineLocation"),"Audio and MIDI must not duplicate engine setup");
+            auto* download=engine->findChildWithID("downloadEngine");
+            require(download && download->isShowing() && download->getWantsKeyboardFocus(),"Official download must be visible and keyboard reachable even with an existing engine");
+            require(download->getAccessibilityHandler()->getTitle()=="Download from Roland...","Download has a concise accessible name");
+            require(download->getAccessibilityHandler()->getHelp().contains("Roland"),"Download has VoiceOver help");
+            juce::KeyboardFocusTraverser traversal;
+            const auto controls=traversal.getAllComponents(&settings);
+            require(std::find(controls.begin(),controls.end(),download)!=controls.end(),"Download belongs to the Preferences Tab loop");
+            require(engine->getLocalBounds().contains(download->getBounds()) && page->getLocalBounds().contains(engine->getBounds()),"Engine controls fit inside General");
+#endif
         }
         juce::ApplicationCommandInfo preferences(audioSettingsCommand),notes(allNotesOffCommand);
         commandInfo(audioSettingsCommand,preferences);commandInfo(allNotesOffCommand,notes);

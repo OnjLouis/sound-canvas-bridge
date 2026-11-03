@@ -14,11 +14,20 @@ struct EngineScene {
     uint8_t globals[34]{};
     uint8_t drums[2][6][128]{};
     InsertionState insertion;
+    uint8_t partModes[16]{0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0};
 };
 constexpr size_t legacySceneSize=1922;
-constexpr unsigned sceneVersion=2;
+constexpr size_t version2SceneSize=1952;
+constexpr unsigned sceneVersion=3;
 static_assert(offsetof(EngineScene,insertion)==legacySceneSize);
-static_assert(sizeof(EngineScene)==1952);
+static_assert(offsetof(EngineScene,partModes)==version2SceneSize);
+static_assert(sizeof(EngineScene)==1968);
+inline bool hasDefaultPartModes(const EngineScene& scene) {
+    for(unsigned part=0;part<16;++part) if(scene.partModes[part]!=(part==9 ? 1 : 0)) return false;
+    return true;
+}
+inline unsigned encodedSceneVersion(const EngineScene& scene) { return hasDefaultPartModes(scene) ? 2 : sceneVersion; }
+inline size_t encodedSceneSize(const EngineScene& scene) { return hasDefaultPartModes(scene) ? version2SceneSize : sizeof(EngineScene); }
 inline bool validScene(const EngineScene& scene) {
     for(int part=0;part<16;++part) {
         for(unsigned i=1;i<15;++i) {
@@ -34,10 +43,12 @@ inline bool validScene(const EngineScene& scene) {
         if(scene.globals[i-24]<controls[i].minimum || scene.globals[i-24]>controls[i].maximum) return false;
     for(const auto& setup:scene.drums) for(const auto& field:setup)
         for(auto value:field) if(value>127) return false;
+    for(auto mode:scene.partModes) if(mode>2) return false;
     return validInsertionState(scene.insertion);
 }
 inline bool decodeScene(unsigned version,const void* bytes,size_t size,EngineScene& destination) {
-    if(!bytes || !((version==1 && size==legacySceneSize) || (version==sceneVersion && size==sizeof(EngineScene)))) return false;
+    if(!bytes || !((version==1 && size==legacySceneSize) || (version==2 && size==version2SceneSize) ||
+                  (version==sceneVersion && size==sizeof(EngineScene)))) return false;
     EngineScene scene;
     std::memcpy(&scene,bytes,size);
     if(!validScene(scene)) return false;
@@ -46,6 +57,7 @@ inline bool decodeScene(unsigned version,const void* bytes,size_t size,EngineSce
 struct StateFrame {
     uint32_t sceneValid=0;
     uint32_t epoch=0;
+    uint64_t factoryRequest=0;
     EngineScene scene;
     uint32_t generations[parameterCount]{};
     int32_t values[parameterCount]{};

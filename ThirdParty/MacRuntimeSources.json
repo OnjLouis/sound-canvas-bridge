@@ -1,0 +1,230 @@
+{
+  "components": [
+    {
+      "component": "Wine",
+      "version": "11.0",
+      "licence": "LGPL-2.1-or-later",
+      "source": "https://codeload.github.com/wine-mirror/wine/zip/db11d0fe6a169c457e23d007e20404643d067aa8",
+      "archive": "wine-source.zip",
+      "bytes": 60394786,
+      "sha256": "4c3378c8bc9a5f7c7b35cfac5de00fa1b33d3fd0d052e53e7993f41a59d049d0"
+    },
+    {
+      "component": "BusyBox",
+      "version": "1.36.1",
+      "licence": "GPL-2.0-only",
+      "source": "https://distro.ibiblio.org/tinycorelinux/15.x/x86/release/src/busybox/busybox-1.36.1.tar.bz2",
+      "archive": "busybox-1.36.1.tar.bz2",
+      "bytes": 2525473,
+      "sha256": "b8cc24c9574d809e7279c3be349795c5d5ceb6fdf19ca709f80cde50e47de314"
+    },
+    {
+      "component": "GNU C Library",
+      "version": "2.38",
+      "licence": "LGPL-2.1-or-later",
+      "source": "https://ftp.gnu.org/gnu/glibc/glibc-2.38.tar.xz",
+      "archive": "glibc-2.38.tar.xz",
+      "bytes": 18913712,
+      "sha256": "fb82998998b2b29965467bc1b69d152e9c307d2cf301c9eafb4555b770ef3fd2"
+    },
+    {
+      "component": "GCC runtime",
+      "version": "13.2.0",
+      "licence": "GPL-3.0-with-GCC-exception",
+      "source": "https://ftp.gnu.org/gnu/gcc/gcc-13.2.0/gcc-13.2.0.tar.xz",
+      "archive": "gcc-13.2.0.tar.xz",
+      "bytes": 87858592,
+      "sha256": "e275e76442a6067341a27f04c5c6b83d8613144004c0413528863dc6b5c743da"
+    },
+    {
+      "component": "util-linux libuuid",
+      "version": "2.39.2",
+      "licence": "LGPL-2.1-or-later",
+      "source": "https://www.kernel.org/pub/linux/utils/util-linux/v2.39/util-linux-2.39.2.tar.xz",
+      "archive": "util-linux-2.39.2.tar.xz",
+      "bytes": 8362220,
+      "sha256": "87abdfaa8e490f8be6dde976f7c80b9b5ff9f301e1b67e3899e1f05a59a1531f"
+    },
+    {
+      "component": "zlib",
+      "version": "1.3",
+      "licence": "Zlib",
+      "source": "https://zlib.net/fossils/zlib-1.3.tar.gz",
+      "archive": "zlib-1.3.tar.gz",
+      "bytes": 1495873,
+      "sha256": "ff0ba4c292013dbc27530b3a81e1f9a813cd39de01ca5e0f8bf355702efa593e"
+    },
+    {
+      "component": "GMP",
+      "version": "6.3.0",
+      "licence": "LGPL-3.0-or-later-or-GPL-2.0-or-later",
+      "source": "https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz",
+      "archive": "gmp-6.3.0.tar.xz",
+      "bytes": 2094196,
+      "sha256": "a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898"
+    },
+    {
+      "component": "GnuTLS",
+      "version": "3.6.12",
+      "licence": "LGPL-2.1-or-later",
+      "source": "https://www.gnupg.org/ftp/gcrypt/gnutls/v3.6/gnutls-3.6.12.tar.xz",
+      "archive": "gnutls-3.6.12.tar.xz",
+      "bytes": 5942064,
+      "sha256": "bfacf16e342949ffd977a9232556092c47164bd26e166736cf3459a870506c4b"
+    },
+    {
+      "component": "Nettle",
+      "version": "3.4.1",
+      "licence": "LGPL-3.0-or-later-or-GPL-2.0-or-later",
+      "source": "https://ftp.gnu.org/gnu/nettle/nettle-3.4.1.tar.gz",
+      "archive": "nettle-3.4.1.tar.gz",
+      "bytes": 1947053,
+      "sha256": "f941cf1535cd5d1819be5ccae5babef01f6db611f9b5a777bae9c7604b8a92ad"
+    },
+    {
+      "component": "libidn2",
+      "version": "2.0.4",
+      "licence": "LGPL-3.0-or-later-or-GPL-2.0-or-later",
+      "source": "https://ftp.gnu.org/gnu/libidn/libidn2-2.0.4.tar.gz",
+      "archive": "libidn2-2.0.4.tar.gz",
+      "bytes": 2008524,
+      "sha256": "644b6b03b285fb0ace02d241d59483d98bc462729d8bb3608d5cad5532f3d2f0"
+    },
+    {
+      "component": "libunistring",
+      "version": "0.9.3",
+      "licence": "LGPL-3.0-or-later-or-GPL-2.0-or-later",
+      "source": "https://ftp.gnu.org/gnu/libunistring/libunistring-0.9.3.tar.gz",
+      "archive": "libunistring-0.9.3.tar.gz",
+      "bytes": 2555215,
+      "sha256": "610d3ec724fbdaa654afe3cff20b9f4d504be3fd296fded2e0f7f764041006a3"
+    },
+    {
+      "component": "libtasn1",
+      "version": "4.13",
+      "licence": "LGPL-2.1-or-later",
+      "source": "https://ftp.gnu.org/gnu/libtasn1/libtasn1-4.13.tar.gz",
+      "archive": "libtasn1-4.13.tar.gz",
+      "bytes": 1891703,
+      "sha256": "7e528e8c317ddd156230c4e31d082cd13e7ddeb7a54824be82632209550c8cca"
+    },
+    {
+      "component": "p11-kit",
+      "version": "0.23.22",
+      "licence": "BSD-3-Clause",
+      "source": "https://github.com/p11-glue/p11-kit/releases/download/0.23.22/p11-kit-0.23.22.tar.xz",
+      "archive": "p11-kit-0.23.22.tar.xz",
+      "bytes": 830016,
+      "sha256": "8a8f40153dd5a3f8e7c03e641f8db400133fb2a6a9ab2aee1b6d0cb0495ec6b6"
+    },
+    {
+      "component": "libffi",
+      "version": "3.3",
+      "licence": "MIT",
+      "source": "https://github.com/libffi/libffi/releases/download/v3.3/libffi-3.3.tar.gz",
+      "archive": "libffi-3.3.tar.gz",
+      "bytes": 1305466,
+      "sha256": "72fba7922703ddfa7a028d513ac15a85c8d54c8d67f55fa5a4802885dc652056"
+    },
+    {
+      "component": "Expat",
+      "version": "2.5.0",
+      "licence": "MIT",
+      "source": "https://github.com/libexpat/libexpat/releases/download/R_2_5_0/expat-2.5.0.tar.xz",
+      "archive": "expat-2.5.0.tar.xz",
+      "bytes": 460560,
+      "sha256": "ef2420f0232c087801abf705e89ae65f6257df6b7931d37846a193ef2e8cdcbe"
+    },
+    {
+      "component": "Fontconfig",
+      "version": "2.13.1",
+      "licence": "MIT",
+      "source": "https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.13.1.tar.bz2",
+      "archive": "fontconfig-2.13.1.tar.bz2",
+      "bytes": 1723639,
+      "sha256": "f655dd2a986d7aa97e052261b36aa67b0a64989496361eca8d604e6414006741"
+    },
+    {
+      "component": "FreeType",
+      "version": "2.11.1",
+      "licence": "FTL-or-GPL-2.0-only",
+      "source": "https://download.savannah.gnu.org/releases/freetype/freetype-2.11.1.tar.xz",
+      "archive": "freetype-2.11.1.tar.xz",
+      "bytes": 2270728,
+      "sha256": "3333ae7cfda88429c97a7ae63b7d01ab398076c3b67182e960e5684050f2c5c8"
+    },
+    {
+      "component": "libpng",
+      "version": "1.6.40",
+      "licence": "Libpng",
+      "source": "https://download.sourceforge.net/libpng/libpng-1.6.40.tar.xz",
+      "archive": "libpng-1.6.40.tar.xz",
+      "bytes": 1021332,
+      "sha256": "535b479b2467ff231a3ec6d92a525906fb8ef27978be4f66dbe05d3f3a01b3a1"
+    },
+    {
+      "component": "libX11",
+      "version": "1.6.12",
+      "licence": "MIT",
+      "source": "https://www.x.org/releases/individual/lib/libX11-1.6.12.tar.bz2",
+      "archive": "libX11-1.6.12.tar.bz2",
+      "bytes": 2376498,
+      "sha256": "f108227469419ac04d196df0f3b80ce1f7f65059bb54c0de811f4d8e03fd6ec7"
+    },
+    {
+      "component": "libXcursor",
+      "version": "1.1.15",
+      "licence": "MIT",
+      "source": "https://www.x.org/releases/individual/lib/libXcursor-1.1.15.tar.bz2",
+      "archive": "libXcursor-1.1.15.tar.bz2",
+      "bytes": 331607,
+      "sha256": "294e670dd37cd23995e69aae626629d4a2dfe5708851bbc13d032401b7a3df6b"
+    },
+    {
+      "component": "libXext",
+      "version": "1.3.4",
+      "licence": "MIT",
+      "source": "https://www.x.org/releases/individual/lib/libXext-1.3.4.tar.bz2",
+      "archive": "libXext-1.3.4.tar.bz2",
+      "bytes": 389114,
+      "sha256": "59ad6fcce98deaecc14d39a672cf218ca37aba617c9a0f691cac3bcd28edf82b"
+    },
+    {
+      "component": "libXi",
+      "version": "1.7.10",
+      "licence": "MIT",
+      "source": "https://www.x.org/releases/individual/lib/libXi-1.7.10.tar.bz2",
+      "archive": "libXi-1.7.10.tar.bz2",
+      "bytes": 484519,
+      "sha256": "36a30d8f6383a72e7ce060298b4b181fd298bc3a135c8e201b7ca847f5f81061"
+    },
+    {
+      "component": "libXinerama",
+      "version": "1.1.4",
+      "licence": "MIT",
+      "source": "https://www.x.org/releases/individual/lib/libXinerama-1.1.4.tar.bz2",
+      "archive": "libXinerama-1.1.4.tar.bz2",
+      "bytes": 287162,
+      "sha256": "0008dbd7ecf717e1e507eed1856ab0d9cf946d03201b85d5dcf61489bb02d720"
+    },
+    {
+      "component": "libXrandr",
+      "version": "1.5.2",
+      "licence": "MIT",
+      "source": "https://www.x.org/releases/individual/lib/libXrandr-1.5.2.tar.bz2",
+      "archive": "libXrandr-1.5.2.tar.bz2",
+      "bytes": 330726,
+      "sha256": "8aea0ebe403d62330bb741ed595b53741acf45033d3bda1792f1d4cc3daee023"
+    },
+    {
+      "component": "libXrender",
+      "version": "0.9.10",
+      "licence": "MIT",
+      "source": "https://www.x.org/releases/individual/lib/libXrender-0.9.10.tar.bz2",
+      "archive": "libXrender-0.9.10.tar.bz2",
+      "bytes": 308318,
+      "sha256": "c06d5979f86e64cabbde57c223938db0b939dff49fdb5a793a1d3d0396650949"
+    }
+  ],
+  "failures": []
+}

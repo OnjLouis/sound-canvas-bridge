@@ -1,6 +1,7 @@
 #pragma once
 #include "Controls.h"
 #include "Scene.h"
+#include "CoreLayouts.h"
 #include <cstdint>
 #include <cstring>
 #include <cstdio>
@@ -36,9 +37,9 @@ public:
         }
         const auto* base=reinterpret_cast<const uint8_t*>(module);
         // Independently verified Windows layout; never apply Mach-O addresses.
-        data=base+0x1a136b0;
-        std::memcpy(&parts,base+0x1a222a0,sizeof(parts));
-        std::memcpy(&drums,base+0x1a1e838,sizeof(drums));
+        data=base+layout->dataRva;
+        std::memcpy(&parts,base+layout->partsRva,sizeof(parts));
+        std::memcpy(&drums,base+layout->drumsRva,sizeof(drums));
 #else
         Dl_info image{};
         if(!dladdr(dlsym(library,"TG_initialize"),&image) || !image.dli_fname ||
@@ -83,19 +84,24 @@ public:
             case ControlScope::Global:
 #ifdef _WIN32
                 if(index>=24 && index<=26) {
-                    constexpr ptrdiff_t masterOffsets[]{0xb04a,0xb04e,0xb04d};
-                    value=data[masterOffsets[index-24]];
+                    constexpr ptrdiff_t masterOffsets[]{0,4,3};
+                    value=data[layout->masterVolume+masterOffsets[index-24]];
                 } else
 #endif
-                value=data[definition.offset];break;
-            case ControlScope::Part: value=parts[0x3dc+gsPart(part)*0x488+definition.offset];break;
+                value=dataAt(definition.offset);break;
+            case ControlScope::Part:
+#ifdef _WIN32
+                value=parts[layout->firstPart+gsPart(part)*layout->partStride+definition.offset];break;
+#else
+                value=parts[0x3dc+gsPart(part)*0x488+definition.offset];break;
+#endif
             case ControlScope::Drum: value=drums[setup*0x50c+definition.offset+note];break;
             case ControlScope::Selector: return index==drumNoteIndex ? note : index==drumSetupIndex ? setup : insertionParameter;
             case ControlScope::InsertionType:
-                value=insertionTypeIndexForCode(data[insertionTypeOffset+1],data[insertionTypeOffset]);break;
+                value=insertionTypeIndexForCode(dataAt(insertionTypeOffset+1),dataAt(insertionTypeOffset));break;
             case ControlScope::InsertionParameter:
                 if(insertionParameter<1 || insertionParameter>static_cast<int>(insertionParameterCount)) return -1;
-                value=data[insertionFirstParameterOffset+insertionParameter-1];break;
+                value=dataAt(insertionFirstParameterOffset+insertionParameter-1);break;
             default: return -1;
         }
         return value>=definition.minimum && value<=definition.maximum ? value : -1;
@@ -117,14 +123,20 @@ public:
         const int type=read(insertionTypeIndex,0,36,0);
         if(type<0) return false;
         insertion.type=static_cast<uint8_t>(type);
-        for(unsigned i=0;i<insertionParameterCount;++i) insertion.parameters[i]=data[insertionFirstParameterOffset+i];
-        insertion.toReverb=data[0xb940];insertion.toChorus=data[0xb941];insertion.toDelay=data[0xb942];insertion.eq=data[0xb946];
-        insertion.controlSource1=data[0xb948];insertion.controlDepth1=data[0xb949];
-        insertion.controlSource2=data[0xb94a];insertion.controlDepth2=data[0xb94b];
+        for(unsigned i=0;i<insertionParameterCount;++i) insertion.parameters[i]=dataAt(insertionFirstParameterOffset+i);
+        insertion.toReverb=dataAt(0xb940);insertion.toChorus=dataAt(0xb941);insertion.toDelay=dataAt(0xb942);insertion.eq=dataAt(0xb946);
+        insertion.controlSource1=dataAt(0xb948);insertion.controlDepth1=dataAt(0xb949);
+        insertion.controlSource2=dataAt(0xb94a);insertion.controlDepth2=dataAt(0xb94b);
         insertion.valid=1;
         return validInsertionState(insertion);
     }
 private:
+    uint8_t dataAt(ptrdiff_t offset) const {
+#ifdef _WIN32
+        if(offset>=insertionTypeOffset && offset<=0xb94b) offset+=layout->insertionDelta;
+#endif
+        return data[offset];
+    }
     static bool readable(const void* pointer,size_t required) {
         if(!pointer) return false;
 #ifdef _WIN32
@@ -148,10 +160,18 @@ private:
                required<=length-(address-start) && (info.protection&VM_PROT_READ);
 #endif
     }
-    static bool recognisedFile(const char* path) {
+    bool recognisedFile(const char* path) {
         // Internal layouts are never guessed for a different vendor build.
         // File I/O and validation happen only during helper initialisation.
 #ifdef _WIN32
+#ifdef SCBRIDGE_VERIFIED_TRANSLATED_CORE
+        // Only the private translated guest uses this path. Its native parent
+        // hashes the actual DLL before starting it and supplies the identity.
+        char verified[65]{};
+        if(GetEnvironmentVariableA("SCBRIDGE_VERIFIED_CORE_SHA256",verified,sizeof(verified))!=64) return false;
+        layout=windowsCoreLayout(verified,32);
+        return layout!=nullptr;
+#else
         const auto count=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,path,-1,nullptr,0);
         if(count<=0) return false;
         std::wstring wide(static_cast<size_t>(count),L'\0');
@@ -170,7 +190,9 @@ private:
         BCryptDestroyHash(hash);BCryptCloseAlgorithmProvider(algorithm,0);
         if(!ok) return false;
         char hex[65]{};for(size_t i=0;i<sizeof(digest);++i) std::snprintf(hex+i*2,3,"%02x",digest[i]);
-        return !std::strcmp(hex,"117e6aa147a96fbde5e10d2caf16c89965acc1e44235fd245992216cc620bdb1");
+        layout=windowsCoreLayout(hex,sizeof(void*)*8);
+        return layout!=nullptr;
+#endif
 #else
         auto* file=std::fopen(path,"rb");if(!file) return false;
         CC_SHA256_CTX context;CC_SHA256_Init(&context);
@@ -191,5 +213,8 @@ private:
     const uint8_t* parts=nullptr;
     const uint8_t* drums=nullptr;
     void* verifiedLibrary=nullptr;
+#ifdef _WIN32
+    const WindowsCoreLayout* layout=nullptr;
+#endif
 };
 }

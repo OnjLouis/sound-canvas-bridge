@@ -108,6 +108,8 @@ struct InputPacket {
     uint32_t count = 0, bytes = 0, reset = 0;
     uint32_t restoreSceneValid=0;
     uint32_t stateEpoch=0;
+    uint64_t factoryRequest=0;
+    uint64_t factoryExpected[4]{};
     EngineScene restoredScene;
     int32_t parameters[parameterCount]{};
     uint32_t generations[parameterCount]{};

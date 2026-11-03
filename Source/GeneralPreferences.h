@@ -3,6 +3,7 @@
 #include "StartupService.h"
 #include "UpdateService.h"
 #include "TransientTooltip.h"
+#include "EnginePreferences.h"
 #ifdef _WIN32
 #include "WindowsInstallation.h"
 #endif
@@ -10,8 +11,8 @@
 namespace scbridge {
 class GeneralPreferences final : public juce::Component,private juce::Timer {
 public:
-    GeneralPreferences(AppPreferences& value,StartupService& login,UpdateService& updater)
-        :preferences(value),startup(login),updates(updater) {
+    GeneralPreferences(AppPreferences& value,StartupService& login,UpdateService& updater,std::function<void()> changed={})
+        :preferences(value),startup(login),updates(updater),engine(std::move(changed)) {
         setName("General preferences");setFocusContainerType(FocusContainerType::keyboardFocusContainer);
         frequencyLabel.setText("Check for updates",juce::dontSendNotification);frequencyLabel.setAccessible(false);
         frequency.addItemList({"Never","At startup","Hourly","Daily"},1);
@@ -57,6 +58,7 @@ public:
         desktop.setWantsKeyboardFocus(true);desktop.setExplicitFocusOrder(5);status.setExplicitFocusOrder(6);
         desktop.onClick=[this] { useLocalApplication(false); };addAndMakeVisible(desktop);
 #endif
+        engine.setExplicitFocusOrder(7);addAndMakeVisible(engine);
         setSize(650,630);startTimer(500);timerCallback();
     }
     void resized() override {
@@ -65,6 +67,9 @@ public:
         hidden.setBounds(12,170,getWidth()-24,32);status.setBounds(12,222,getWidth()-24,100);
 #ifdef _WIN32
         desktop.setBounds(12,220,210,32);status.setBounds(12,266,getWidth()-24,100);
+        engine.setBounds(12,380,getWidth()-24,190);
+#else
+        engine.setBounds(12,340,getWidth()-24,190);
 #endif
     }
 #ifdef _WIN32
@@ -126,6 +131,7 @@ private:
     }
     static void showError(const juce::String& text) { juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Preferences",text); }
     AppPreferences& preferences;StartupService& startup;UpdateService& updates;
+    EnginePreferences engine;
     juce::Label frequencyLabel,status;juce::ComboBox frequency;juce::TextButton check;juce::ToggleButton runLogin,hidden;
     TransientTooltip tips{this,700};
 #ifdef _WIN32

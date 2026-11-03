@@ -130,6 +130,13 @@ int helperMain(int argc, char** argv) {
                 auto dt1=[&](unsigned address,int value) {
                     queueMessage(dt1Message(address,static_cast<uint8_t>(value)));
                 };
+                for(unsigned channel=0;channel<16;++channel) {
+                    const unsigned block=channel==9 ? 0 : channel<9 ? channel+1 : channel;
+                    const auto mode=dt1Message(0x401015+(block<<8),scene.partModes[channel]);
+                    queueMessage(mode);mirror.observeLong(mode.bytes.data(),mode.size);
+                }
+                // Restore part roles before PCs, then restore kit edits afterwards.
+                render(shared->left,shared->right,32);messageCount=0;
                 const int controllers[]={7,10,11,1,91,93,94};
                 const int toneNrpn[]={0x20,0x21,0x63,0x66};
                 for(int channel=0;channel<16;++channel) {

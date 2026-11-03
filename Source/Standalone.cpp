@@ -13,6 +13,7 @@
 #include "StandaloneControls.h"
 #include "StandaloneAudio.h"
 #include "ControlHelp.h"
+#include "DawPresets.h"
 #ifdef _WIN32
 #include "WindowsMenuBar.h"
 #endif
@@ -23,7 +24,7 @@ namespace {
 enum Command : int { audioSettingsCommand=0x20001,contextHelpCommand,manualCommand,historyCommand,
                     updatesCommand,projectCommand,contactCommand,donateCommand,allNotesOffCommand,
                     panicCommand,gsResetCommand,gmResetCommand,restartEngineCommand,activityDisplayCommand,
-                    readActivityCommand,showControlsCommand,hideControlsCommand,aboutCommand };
+                    readActivityCommand,showControlsCommand,hideControlsCommand,dawPresetsCommand,aboutCommand };
 constexpr const char* virtualPortName="Sound Canvas Bridge";
 constexpr const char* donateUrl="https://onj.me/donate";
 constexpr const char* contactUrl="https://onj.me/contact";
@@ -82,6 +83,7 @@ bool commandInfo(juce::CommandID command,juce::ApplicationCommandInfo& result) {
             result.setInfo("Read MIDI Activity","Read a snapshot without continuous announcements","View",0);
             result.addDefaultKeypress('i',actionModifiers);break;
         case aboutCommand: result.setInfo("About Sound Canvas Bridge","Show application information","Help",0);break;
+        case dawPresetsCommand: result.setInfo("Install DAW Presets","Install the grouped native AU/VST3 preset files for this user","Help",0);break;
         case showControlsCommand: result.setInfo("Show Controls","Show the Sound Canvas controls window","View",0);break;
         case hideControlsCommand:
             result.setInfo(
@@ -181,8 +183,8 @@ private:
 
 class AudioPreferences final : public juce::Component,private juce::ChangeListener,private juce::Timer {
 public:
-    explicit AudioPreferences(juce::AudioDeviceManager& manager,std::function<void()> test={},std::function<bool()> playing={},std::function<void()> engineChanged={})
-        :devices(manager),midi(manager),playTest(std::move(test)),testPlaying(std::move(playing)),onEngineChanged(std::move(engineChanged)) {
+    explicit AudioPreferences(juce::AudioDeviceManager& manager,std::function<void()> test={},std::function<bool()> playing={})
+        :devices(manager),midi(manager),playTest(std::move(test)),testPlaying(std::move(playing)) {
         setName("Audio settings");setTitle("Audio settings");
         setFocusContainerType(juce::Component::FocusContainerType::keyboardFocusContainer);
 #ifdef _WIN32
@@ -231,21 +233,11 @@ public:
         status.setName("Audio status");status.setTitle("Audio status");status.setWantsKeyboardFocus(true);status.setExplicitFocusOrder(7);
         addAndMakeVisible(refresh);addAndMakeVisible(status);addAndMakeVisible(midiHeading);
         addAndMakeVisible(midi);addAndMakeVisible(testButton);
-        engineHeading.setText("Sound Canvas VA location",juce::dontSendNotification);engineHeading.setAccessible(false);
-        enginePath.setName("Sound Canvas VA location");enginePath.setTitle(enginePath.getName());enginePath.setComponentID("engineLocation");
-        enginePath.setReadOnly(true);enginePath.setMultiLine(false);enginePath.setTabKeyUsedAsCharacter(false);enginePath.setExplicitFocusOrder(8);
-        enginePath.setDescription(enginePath.getName());enginePath.setHelpText("Location of the original Sound Canvas VA engine. Select and copy this path, or use Browse to choose another installation.");
-        enginePath.setTooltip(enginePath.getHelpText());
-        browse.setButtonText("Browse...");browse.setName("Browse for Sound Canvas VA");browse.setExplicitFocusOrder(9);
-        browse.setDescription(browse.getName());browse.setHelpText("Choose the original Sound Canvas VA engine, not the bridge. A valid selection is saved and offers an engine restart.");
-        browse.setTooltip(browse.getHelpText());browse.onClick=[this] { chooseEngine(); };
-        engineStatus.setName("Engine location status");engineStatus.setTitle(engineStatus.getName());engineStatus.setWantsKeyboardFocus(true);engineStatus.setExplicitFocusOrder(10);
 #ifdef _WIN32
         refresh.setExplicitFocusOrder(5);midi.setExplicitFocusOrder(7);testButton.setExplicitFocusOrder(8);
-        status.setExplicitFocusOrder(9);enginePath.setExplicitFocusOrder(10);browse.setExplicitFocusOrder(11);engineStatus.setExplicitFocusOrder(12);
+        status.setExplicitFocusOrder(9);
 #endif
-        for(auto* control:std::initializer_list<juce::Component*>{&engineHeading,&enginePath,&browse,&engineStatus}) addAndMakeVisible(control);
-        updateEnginePath();devices.addChangeListener(this);setSize(650,630);update();startTimer(150);timerCallback();
+        devices.addChangeListener(this);setSize(650,630);update();startTimer(150);timerCallback();
     }
     ~AudioPreferences() override { devices.removeChangeListener(this); }
 #ifdef SCBRIDGE_STANDALONE_TEST
@@ -268,34 +260,8 @@ public:
 #endif
         testButton.setBounds(164,400,200,32);
         status.setBounds(12,444,getWidth()-24,56);
-        engineHeading.setBounds(12,502,getWidth()-24,24);enginePath.setBounds(12,532,getWidth()-144,32);
-        browse.setBounds(getWidth()-120,532,108,32);engineStatus.setBounds(12,576,getWidth()-24,44);
     }
 private:
-    void updateEnginePath() {
-        scbridge::EngineLocation location;const auto path=location.bundle();juce::String error;
-        enginePath.setText(path.getFullPathName(),false);
-        engineStatus.setText(scbridge::EngineLocation::validate(path,error) ? "Sound Canvas VA installation found." : "Sound Canvas VA not found. Use Browse to choose its original engine.",juce::dontSendNotification);
-    }
-    void chooseEngine() {
-        chooser=std::make_unique<juce::FileChooser>("Choose Sound Canvas VA",scbridge::EngineLocation().bundle().getParentDirectory(),
-#ifdef _WIN32
-            "SCCore.dll"
-#else
-            "*.vst"
-#endif
-        );
-        juce::Component::SafePointer<AudioPreferences> safe(this);
-        chooser->launchAsync(juce::FileBrowserComponent::openMode|juce::FileBrowserComponent::canSelectFiles,
-            [safe](const juce::FileChooser& dialog) {
-                if(!safe || dialog.getResult()==juce::File()) return;
-                scbridge::EngineLocation location;juce::String error;
-                if(!location.save(dialog.getResult(),error)) {
-                    juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Sound Canvas VA location",error);return;
-                }
-                safe->updateEnginePath();if(safe->onEngineChanged) safe->onEngineChanged();
-            });
-    }
     static void fill(juce::ComboBox& choice,const juce::StringArray& names,int selected) {
         juce::StringArray previous;
         for(int i=0;i<choice.getNumItems();++i) previous.add(choice.getItemText(i));
@@ -360,11 +326,6 @@ private:
     juce::TextButton refresh,testButton;
     std::function<void()> playTest;
     std::function<bool()> testPlaying;
-    std::function<void()> onEngineChanged;
-    juce::Label engineHeading,engineStatus;
-    juce::TextEditor enginePath;
-    juce::TextButton browse;
-    std::unique_ptr<juce::FileChooser> chooser;
     scbridge::TransientTooltip tips{this,700};
 #ifdef _WIN32
     juce::Label driverLabel;
@@ -375,12 +336,12 @@ private:
 };
 
 bool focusFirstControl(juce::Component& root) {
-    // Keyboard traversers omit non-focusable containers, hiding the editor's
-    // controls when called on the surrounding standalone layout.
+    // Follow either kind of focus container so hosted and standalone editors
+    // can share their initial control without focusing a layout wrapper.
     juce::FocusTraverser traverser;
         for(auto* control:traverser.getAllComponents(&root))
             if(control->isShowing() && control->isEnabled()) {
-                if(control->isKeyboardFocusContainer() && control!=&root && focusFirstControl(*control)) return true;
+                if(control->isFocusContainer() && control!=&root && focusFirstControl(*control)) return true;
                 if(!control->getWantsKeyboardFocus()) continue;
                 control->grabKeyboardFocus();
                 if(auto* handler=control->getAccessibilityHandler()) handler->grabFocus();
@@ -481,10 +442,10 @@ public:
                    std::function<void()> test,std::function<bool()> playing,std::function<void()> changed)
         :TabbedComponent(juce::TabbedButtonBar::TabsAtTop) {
         setName("Preferences categories");
-        auto* general=new scbridge::GeneralPreferences(preferences,startup,updates);general->setComponentID("generalPreferences");
+        auto* general=new scbridge::GeneralPreferences(preferences,startup,updates,std::move(changed));general->setComponentID("generalPreferences");
         const auto background=juce::LookAndFeel::getDefaultLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId);
         addTab("General",background,general,true);
-        addTab("Audio and MIDI",background,new AudioPreferences(manager,std::move(test),std::move(playing),std::move(changed)),true);
+        addTab("Audio and MIDI",background,new AudioPreferences(manager,std::move(test),std::move(playing)),true);
         // Preferences owns one Tab loop on both platforms. Nested keyboard
         // containers otherwise wrap within a page and make the tabs unreachable.
         setFocusContainerType(juce::Component::FocusContainerType::focusContainer);
@@ -555,6 +516,7 @@ public:
         if(restoreFocus && onClose) onClose();
     }
     void selectAudioTab() { tabs.setCurrentTabIndex(1); }
+    void selectGeneralTab() { tabs.setCurrentTabIndex(0); }
     void focusInitialControl() {
         if(auto* content=tabs.getCurrentContentComponent()) scheduleInitialFocus(*content);
     }
@@ -723,6 +685,10 @@ public:
         logger.reset(juce::FileLogger::createDefaultAppLogger("OnjMusic/SoundCanvasBridge","Standalone.log","Standalone started",262144));
 #endif
         juce::Logger::setCurrentLogger(logger.get());
+        if(resourceFile("DAW Presets.zip").existsAsFile()) {
+            const auto result=scbridge::DawPresets::installBundled(resourceFile("DAW Presets.zip"));
+            juce::Logger::writeToLog(result.wasOk() ? "Grouped DAW presets ready" : "DAW preset installation: "+result.getErrorMessage());
+        }
         processor.reset(createPluginFilter());
         auto session=directory.getChildFile("Standalone.state");
         if(session.existsAsFile() && session.getSize()<=65536) {
@@ -796,18 +762,20 @@ public:
                 {"&File",{audioSettingsCommand,0,juce::StandardApplicationCommandIDs::quit},{"&Preferences...",{},"E&xit"}},
                 windowsMidiMenu(),
                 {"&View",{showControlsCommand,hideControlsCommand,0,activityDisplayCommand,readActivityCommand}},
-                {"&Help",{historyCommand,contextHelpCommand,manualCommand,projectCommand,0,updatesCommand,contactCommand,donateCommand,aboutCommand}}});
+                {"&Help",{historyCommand,contextHelpCommand,manualCommand,dawPresetsCommand,projectCommand,0,updatesCommand,contactCommand,donateCommand,aboutCommand}}});
 #else
         juce::MenuBarModel::setMacMainMenu(this,&applicationExtras);
 #endif
         devices.addChangeListener(this);
         if(error.isEmpty()) saveAudioSettings();
         const bool engineReady=scbridge::EngineLocation().available();
-        if(scbridge::AppPreferences::shouldHide(hiddenStart,statusItem->available(),engineReady,error.isEmpty() && devices.getCurrentAudioDevice()!=nullptr)) {
+        const bool engineSetup=scbridge::AppPreferences::shouldShowEngineSetup(appPreferences.isFirstLaunch(),engineReady);
+        if(!engineSetup && scbridge::AppPreferences::shouldHide(hiddenStart,statusItem->available(),engineReady,error.isEmpty() && devices.getCurrentAudioDevice()!=nullptr)) {
             hideControls();
         } else {
             if(hiddenStart) showControls();
-            if(error.isNotEmpty() || !engineReady || devices.getCurrentAudioDevice()==nullptr) showSettings(true,error);
+            if(engineSetup) showSettings(false,error,true);
+            else if(error.isNotEmpty() || devices.getCurrentAudioDevice()==nullptr) showSettings(true,error);
         }
         updates.start();
     }
@@ -845,6 +813,13 @@ public:
         switch(info.commandID) {
             case audioSettingsCommand: showSettings();return true;
             case contextHelpCommand: showControlHelp();return true;
+            case dawPresetsCommand: {
+                const auto folder=scbridge::DawPresets::defaultFolder();
+                const auto result=scbridge::DawPresets::installBundled(resourceFile("DAW Presets.zip"));
+                helpWindow=std::make_unique<ControlHelpWindow>("DAW Presets",result.wasOk() ?
+                    "The grouped DAW presets are installed.\n\n"+folder.getFullPathName() : result.getErrorMessage(),juce::Component::getCurrentlyFocusedComponent());
+                return true;
+            }
             case manualCommand: openResource("Manual.html");return true;
             case historyCommand: openResource("VersionHistory.html");return true;
             case projectCommand: openLink(projectUrl);return true;
@@ -889,7 +864,7 @@ private:
             menu.addCommandItem(&commands,showControlsCommand);menu.addCommandItem(&commands,hideControlsCommand);menu.addSeparator();
             menu.addCommandItem(&commands,activityDisplayCommand);menu.addCommandItem(&commands,readActivityCommand);
         } else {
-            for(int command:{historyCommand,contextHelpCommand,manualCommand,projectCommand}) menu.addCommandItem(&commands,command);
+            for(int command:{historyCommand,contextHelpCommand,manualCommand,dawPresetsCommand,projectCommand}) menu.addCommandItem(&commands,command);
             menu.addSeparator();
             for(int command:{updatesCommand,contactCommand,donateCommand,aboutCommand}) menu.addCommandItem(&commands,command);
         }
@@ -920,7 +895,7 @@ private:
 #endif
         juce::Logger::writeToLog("Controls hidden to menu bar; audio continues");
     }
-    void showSettings(bool audioRecovery=false,const juce::String& audioError={}) {
+    void showSettings(bool audioRecovery=false,const juce::String& audioError={},bool engineSetup=false) {
         if(statusItem) statusItem->setControlsHidden(false);
 #ifndef _WIN32
         [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
@@ -946,14 +921,17 @@ private:
             settings->addKeyListener(commands.getKeyMappings());
         }
 #ifdef _WIN32
-        if(audioRecovery) settings->selectAudioTab();
+        if(engineSetup) settings->selectGeneralTab();
+        else if(audioRecovery) settings->selectAudioTab();
         if(window) {
             if(statusItem) statusItem->setControlsHidden(false);
             restoreControlsWindow(*window);window->showPreferences(*settings);
         }
 #else
-        if(audioRecovery)
-            if(auto* tabs=dynamic_cast<PreferenceTabs*>(settings->getContentComponent())) tabs->setCurrentTabIndex(1);
+        if(auto* tabs=dynamic_cast<PreferenceTabs*>(settings->getContentComponent())) {
+            if(engineSetup) tabs->setCurrentTabIndex(0);
+            else if(audioRecovery) tabs->setCurrentTabIndex(1);
+        }
         restoreControlsWindow(*settings);
 #endif
         if(audioError.isNotEmpty()) juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Audio output unavailable",
@@ -1009,14 +987,17 @@ private:
         if(!juce::URL(url).launchInDefaultBrowser())
             juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Open link","The browser could not open this link: "+url);
     }
-    static void openResource(const juce::String& name) {
-        auto file=juce::File::getSpecialLocation(juce::File::currentApplicationFile)
+    static juce::File resourceFile(const juce::String& name) {
+        return juce::File::getSpecialLocation(juce::File::currentApplicationFile)
 #ifdef _WIN32
             .getParentDirectory()
 #else
             .getChildFile("Contents/Resources")
 #endif
             .getChildFile(name);
+    }
+    static void openResource(const juce::String& name) {
+        const auto file=resourceFile(name);
         if(!file.existsAsFile() || !file.startAsProcess())
             juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Help","The bundled document could not be opened.");
     }

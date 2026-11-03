@@ -3,14 +3,18 @@
 #include <iostream>
 #include <set>
 #include "AudioStartupFixture.h"
+#include "PreferencesStartupFixture.h"
+#include "EngineDownloadFixture.h"
 
 int main(int argc,char** argv) {
     juce::ScopedJuceInitialiser_GUI gui;
+    if(argc==2 && std::string(argv[1])=="--download-flow") return engineDownloadFixture::run();
     int failures=0;
     auto check=[&](bool success,const char* message) {
         if(!success) { std::cerr<<"FAIL: "<<message<<'\n';++failures; }
     };
     audioStartupFixture::run(check);
+    preferencesStartupFixture::run(check);
     std::unique_ptr<juce::AudioProcessor> processor(createPluginFilter());
     scbridge::MidiActivity activity;
     {
@@ -53,7 +57,8 @@ int main(int argc,char** argv) {
         const int order=child->getExplicitFocusOrder();
         if(order>0) check(orders.insert(order).second,"Audio controls must have unique explicit tab positions");
     }
-    check(orders.size()==12,"Windows audio settings must contain twelve ordered targets");
+    check(orders.size()==9,"Audio and MIDI must contain device controls only");
+    check(!audio.findChildWithID("engineLocation"),"Engine location must not remain in Audio and MIDI");
     juce::KeyboardFocusTraverser audioTraversal;
     for(auto* child:audioTraversal.getAllComponents(&audio)) {
         check(child->getName().isNotEmpty(),"Audio preferences must not contain unnamed keyboard stops");
@@ -76,6 +81,17 @@ int main(int argc,char** argv) {
     for(auto* child:settings.getChildren()) if(auto* candidate=dynamic_cast<juce::TabbedComponent*>(child)) categories=candidate;
     check(categories!=nullptr,"Preferences must expose its category tabs");
     if(categories) {
+        auto* engine=categories->getTabContentComponent(0)->findChildWithID("enginePreferences");
+        check(engine!=nullptr,"Engine setup must live in General on Windows");
+        if(engine) {
+            auto* download=engine->findChildWithID("downloadEngine");
+            auto* path=engine->findChildWithID("engineLocation");
+            check(download && path,"General must expose engine location and the native Windows download");
+            check(download && download->getWantsKeyboardFocus(),"Engine download must be keyboard reachable");
+            check(download && download->getAccessibilityHandler()->getHelp().contains("Roland"),"Download needs screen-reader help");
+            check(!engine->isKeyboardFocusContainer(),"Engine setup must not trap the Preferences tab loop");
+            check(categories->getTabContentComponent(0)->getLocalBounds().contains(engine->getBounds()),"Engine setup must fit within General");
+        }
         auto* general=categories->getTabbedButtonBar().getTabButton(0);
         auto* audioTab=categories->getTabbedButtonBar().getTabButton(1);
         check(general->getHelpText().isEmpty() && audioTab->getHelpText().isEmpty(),"Category buttons must not announce instructional hints");

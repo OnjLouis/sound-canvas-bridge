@@ -1,0 +1,183 @@
+#include <juce_audio_utils/juce_audio_utils.h>
+#include <iostream>
+#include <memory>
+#include <set>
+#include "../Source/ProgramBrowser.h"
+#include "../Source/Controls.h"
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
+extern juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter();
+struct ProgramNotification final : juce::AudioProcessorListener {
+    explicit ProgramNotification(juce::AudioProcessor& source):processor(source) { processor.addListener(this); }
+    ~ProgramNotification() override { processor.removeListener(this); }
+    void audioProcessorParameterChanged(juce::AudioProcessor*,int,float) override {}
+    void audioProcessorChanged(juce::AudioProcessor*,const juce::AudioProcessor::ChangeDetails& changes) override {
+        programChanged|=changes.programChanged;
+    }
+    juce::AudioProcessor& processor;
+    bool programChanged=false;
+};
+
+int main(int argc,char** argv) {
+    juce::ScopedJuceInitialiser_GUI gui;
+    std::unique_ptr<juce::AudioProcessor> processor(createPluginFilter());
+    ProgramNotification notification(*processor);
+    std::unique_ptr<juce::AudioProcessorEditor> editor(processor->createEditorIfNeeded());
+    juce::Component wrapper;
+    wrapper.setSize(editor->getWidth(), editor->getHeight());
+    wrapper.addAndMakeVisible(*editor);
+    const auto snapshot=[&](const char* name) {
+        if(argc!=3 || juce::String(argv[1])!="--snapshot-dir") return true;
+        const juce::File directory{juce::String(argv[2])};
+        if(directory.createDirectory().failed()) return false;
+        juce::FileOutputStream stream(directory.getChildFile(name));
+        return stream.openedOk() && juce::PNGImageFormat().writeImageToStream(editor->createComponentSnapshot(editor->getLocalBounds()),stream);
+    };
+    if(!snapshot("controls.png")) { std::cerr<<"FAIL: control snapshot\n";return 1; }
+    juce::KeyboardFocusTraverser traversal;
+    auto* first = traversal.getDefaultComponent(&wrapper);
+    if (!first || first->getComponentID() != "controlPage") {
+        std::cerr << "FAIL: native plug-in wrapper focus must reach Control page without standalone focus helpers\n";
+        return 1;
+    }
+    const auto targets = traversal.getAllComponents(&wrapper);
+    std::set<int> order;
+    for (auto* target : targets) {
+        if (target->getName().isEmpty()) {
+            std::cerr << "FAIL: unnamed plug-in keyboard target\n";
+            return 1;
+        }
+        const auto position = target->getExplicitFocusOrder();
+        if (position > 0 && !order.insert(position).second) {
+            std::cerr << "FAIL: duplicate plug-in keyboard position\n";
+            return 1;
+        }
+    }
+    if (processor->getParameters().size() != 93) {
+        std::cerr << "FAIL: existing automation/NKS parameter count changed\n";
+        return 1;
+    }
+    for(unsigned i=0;i<scbridge::parameterCount;++i) {
+        auto* parameter=dynamic_cast<juce::RangedAudioParameter*>(processor->getParameters()[static_cast<int>(i)]);
+        const auto& expected=scbridge::controls[i];
+        if(!parameter || parameter->paramID!=expected.id || parameter->getName(128)!=expected.name ||
+           parameter->getNormalisableRange().start!=expected.minimum || parameter->getNormalisableRange().end!=expected.maximum ||
+           std::abs(parameter->getDefaultValue()-parameter->convertTo0to1(static_cast<float>(expected.initial)))>0.000001f) {
+            std::cerr<<"FAIL: automation identity/range/default changed at "<<i<<'\n';return 1;
+        }
+    }
+    wrapper.setTopLeftPosition(-10000,-10000);wrapper.addToDesktop(0);wrapper.setVisible(true);
+#ifdef _WIN32
+    SetFocus(static_cast<HWND>(wrapper.getPeer()->getNativeHandle()));
+    auto* focused=juce::Component::getCurrentlyFocusedComponent();
+    if(!focused || focused->getComponentID()!="controlPage") {
+        std::cerr<<"FAIL: native HWND focus handoff must reach the first plug-in control\n";return 1;
+    }
+    wrapper.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::tabKey));
+    focused=juce::Component::getCurrentlyFocusedComponent();
+    if(!focused || focused->getComponentID()!="browsePresets") {
+        std::cerr<<"FAIL: Tab must continue from the native focus handoff\n";return 1;
+    }
+#endif
+    if(processor->getNumPrograms()!=static_cast<int>(scbridge::catalogueCount) ||
+       !processor->getProgramName(0).contains("SC-8820") || !processor->getProgramName(0).contains("Piano 1")) {
+        std::cerr<<"FAIL: native program catalogue names/count\n";return 1;
+    }
+    std::vector<float> untouched;
+    for(int i=4;i<93;++i) untouched.push_back(processor->getParameters()[i]->getValue());
+    processor->setCurrentProgram(1);
+    if(processor->getCurrentProgram()!=1) { std::cerr<<"FAIL: factory program recall before audio starts\n";return 1; }
+    for(int i=4;i<93;++i) if(processor->getParameters()[i]->getValue()!=untouched[static_cast<size_t>(i-4)]) {
+        std::cerr<<"FAIL: sound selection changed mixer/effects/routing\n";return 1;
+    }
+    processor->setCurrentProgram(2872);
+    if(processor->getCurrentProgram()!=2872 || processor->getParameters()[0]->getValue()!=9.0f/15.0f) {
+        std::cerr<<"FAIL: drum catalogue selection must use an existing rhythm part\n";return 1;
+    }
+    juce::MemoryBlock saved;
+    processor->getStateInformation(saved);
+    std::unique_ptr<juce::AudioProcessor> restored(createPluginFilter());
+    restored->setStateInformation(saved.getData(),static_cast<int>(saved.getSize()));
+    if(restored->getCurrentProgram()!=2872) { std::cerr<<"FAIL: pending selection save/restore\n";return 1; }
+    processor->setCurrentProgram(0);
+    auto* open=dynamic_cast<juce::TextButton*>(editor->findChildWithID("browsePresets"));
+    if(!open || !open->onClick) { std::cerr<<"FAIL: named preset browser command missing\n";return 1; }
+    const auto* browseAccessibility=open->getAccessibilityHandler();
+    if(!browseAccessibility || !browseAccessibility->getHelp().contains("compatibility map")) {
+        std::cerr<<"FAIL: Browse presets must expose native accessibility help\n";return 1;
+    }
+    open->onClick();
+    scbridge::ProgramBrowser* browser=nullptr;
+    for(auto* child:editor->getChildren()) if(auto* candidate=dynamic_cast<scbridge::ProgramBrowser*>(child)) browser=candidate;
+    if(!browser || !browser->isVisible() || browser->matchingCount()!=1262) {
+        std::cerr<<"FAIL: browser initial map/type filters\n";return 1;
+    }
+    if(!snapshot("browser.png")) { std::cerr<<"FAIL: browser snapshot\n";return 1; }
+    auto* search=dynamic_cast<juce::TextEditor*>(browser->findChildWithID("presetSearch"));
+    auto* list=dynamic_cast<juce::ListBox*>(browser->findChildWithID("presetList"));
+    if(!search || !list || list->getListBoxModel()->getNameForRow(0)!="Piano 1") {
+        std::cerr<<"FAIL: browser rows must expose their actual preset names\n";return 1;
+    }
+    list->selectRow(2);
+    if(list->getListBoxModel()->getNameForRow(2)!="Mild Piano") {
+        std::cerr<<"FAIL: browser row repeats map/type/address context\n";return 1;
+    }
+    if(!browser->keyPressed(juce::KeyPress(juce::KeyPress::F1Key))) {
+        std::cerr<<"FAIL: F1 must expose the selected address on request\n";return 1;
+    }
+    auto* details=dynamic_cast<juce::TextEditor*>(browser->findChildWithID("presetDetails"));
+    if(!details || !details->isVisible() || !details->getText().contains("Mild Piano") ||
+       !details->getText().contains("SC-8820") || !details->getText().contains("Bank: 2") || !details->getText().contains("Program: 1")) {
+        std::cerr<<"FAIL: requested details must retain exact sound address\n";return 1;
+    }
+    if(!snapshot("details.png")) { std::cerr<<"FAIL: details snapshot\n";return 1; }
+    browser->keyPressed(juce::KeyPress(juce::KeyPress::escapeKey));
+    if(!browser->isVisible() || !list->isVisible() || list->getSelectedRow()!=2) {
+        std::cerr<<"FAIL: closing details must return to the same browser row\n";return 1;
+    }
+    search->setText("UprightPiano",false);search->onTextChange();
+    if(browser->matchingCount()!=1 || browser->selectedProgram()!=1) { std::cerr<<"FAIL: searchable names\n";return 1; }
+    if(processor->getCurrentProgram()!=0) { std::cerr<<"FAIL: filtering must not load sounds\n";return 1; }
+    search->onReturnKey();
+    if(processor->getCurrentProgram()!=1 || browser->isVisible()) { std::cerr<<"FAIL: Enter loads and closes browser\n";return 1; }
+    const auto name=dynamic_cast<juce::ComboBox*>(editor->findChildWithID("currentSound"));
+    if(!name || name->getText()!="UprightPiano") { std::cerr<<"FAIL: current program name display\n";return 1; }
+    name->keyPressed(juce::KeyPress(juce::KeyPress::upKey));
+    if(processor->getCurrentProgram()!=0 || name->getText()!="Piano 1") {
+        std::cerr<<"FAIL: main preset selector Up must load and name the previous sound\n";return 1;
+    }
+    name->keyPressed(juce::KeyPress(juce::KeyPress::downKey));
+    const auto* selectorAccessibility=name->getAccessibilityHandler();
+    const auto* value=selectorAccessibility ? selectorAccessibility->getValueInterface() : nullptr;
+    if(processor->getCurrentProgram()!=1 || name->getText()!="UprightPiano" || !value || value->getCurrentValueAsString()!="UprightPiano") {
+        std::cerr<<"FAIL: main preset selector Down must expose the new sound name to accessibility\n";return 1;
+    }
+    if(!selectorAccessibility->getHelp().contains("Up and Down")) {
+        std::cerr<<"FAIL: preset selector must expose native accessibility help\n";return 1;
+    }
+    if(name->getProperties()["lastKeyboardAnnouncement"].toString()!="Current sound, UprightPiano") {
+        std::cerr<<"FAIL: preset arrows must request the native spoken-value announcement\n";return 1;
+    }
+    auto* mapChoice=dynamic_cast<juce::ComboBox*>(editor->findChildWithID("map"));
+    if(!mapChoice) { std::cerr<<"FAIL: Sound Map choice missing\n";return 1; }
+    mapChoice->keyPressed(juce::KeyPress(juce::KeyPress::upKey));
+    if(mapChoice->getProperties()["lastKeyboardAnnouncement"].toString()!="Sound Map, SC-88 Pro") {
+        std::cerr<<"FAIL: map arrows must request the native spoken-value announcement\n";return 1;
+    }
+    mapChoice->keyPressed(juce::KeyPress(juce::KeyPress::downKey));
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(180);
+    if(!notification.programChanged) {
+        std::cerr<<"FAIL: internal sound changes must notify the host's current-program display\n";return 1;
+    }
+    for(int i=0;i<20;++i) {
+        name->keyPressed(juce::KeyPress(juce::KeyPress::downKey));
+        if(processor->getCurrentProgram()!=i+2) {
+            std::cerr<<"FAIL: rapid preset arrows must not wait for the display timer\n";return 1;
+        }
+    }
+    name->keyPressed(juce::KeyPress(juce::KeyPress::returnKey));
+    if(!browser->isVisible()) { std::cerr<<"FAIL: Enter on the main preset name must open the searchable browser\n";return 1; }
+    std::cout << "PASS: hosted editor entry, named keyboard traversal and unchanged parameter contract\n";
+}

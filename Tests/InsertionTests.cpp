@@ -61,7 +61,7 @@ int main() {
     assert(!std::memcmp(&initial,&restored,sizeof(initial)));
     assert(!scbridge::decodeScene(1,&initial,sizeof(initial),restored));
     assert(!scbridge::decodeScene(scbridge::sceneVersion,&initial,scbridge::legacySceneSize,restored));
-    assert(!scbridge::decodeScene(3,&initial,sizeof(initial),restored));
+    assert(!scbridge::decodeScene(scbridge::sceneVersion+1,&initial,sizeof(initial),restored));
     assert(!scbridge::decodeScene(1,nullptr,scbridge::legacySceneSize,restored));
     initial.insertion.eq=2;
     assert(!scbridge::decodeScene(scbridge::sceneVersion,&initial,sizeof(initial),restored));

@@ -30,7 +30,11 @@ public:
         if(destination==juce::File{} || !safeAncestors(destination)) return juce::Result::fail("The local installation folder is unavailable or redirected.");
         if(isInstalled(app)) return app.existsAsFile() ? juce::Result::ok() : juce::Result::fail("The installed application is missing.");
         const auto source=app.getParentDirectory();
-        const juce::StringArray optional{"SoundCanvasMidiHost.exe","Windows.Devices.Midi2.dll","SoundCanvasMaintenance.exe","WindowsUpdateKey.xml"};
+        const juce::StringArray optional{"SoundCanvasMidiHost.exe","Windows.Devices.Midi2.dll","SoundCanvasMaintenance.exe","WindowsUpdateKey.xml",
+            "SoundCanvasEngineDownload.exe","Unshield Licence.txt","Zlib Licence.txt"};
+        if(source.getChildFile("SoundCanvasEngineDownload.exe").existsAsFile() &&
+           (!source.getChildFile("Unshield Licence.txt").existsAsFile() || !source.getChildFile("Zlib Licence.txt").existsAsFile()))
+            return juce::Result::fail("The engine download helper's licence files are missing.");
         auto names=requiredFiles();
         for(const auto& name:optional) if(source.getChildFile(name).existsAsFile()) names.add(name);
         if(source.getChildFile("SoundCanvasMaintenance.exe").existsAsFile()!=source.getChildFile("WindowsUpdateKey.xml").existsAsFile())

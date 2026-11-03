@@ -1,4 +1,4 @@
-Sound Canvas Bridge 1.2.0
+Sound Canvas Bridge 1.4.0
 
 Original bridge code: Copyright (c) 2026 Andre Louis / OnjMusic, MIT.
 The JUCE-based official application and plug-ins are distributed under GNU
@@ -49,3 +49,35 @@ normal system MIDI inputs do not require that preview runtime.
 Roland Sound Canvas VA is an external, owner-installed dependency. No Roland
 binary, ROM, licence key or installer is distributed in this project. Roland,
 Sound Canvas and associated product names remain their owners' trademarks.
+
+The optional native engine-download helper uses MIT-licensed libunshield and
+zlib from the pinned JUCE source distribution. Their licence notices accompany
+the helper. Windows extraction uses the operating system's cabinet API. macOS
+uses its standard archive utility. No downloaded installer is executed.
+
+Native Apple Silicon compatibility worker
+BoxedWine revision 9ca68a48ed92a6bc1cc02d24bf27399aa2a59760, GPL version 2
+or later. Its separately executed worker is distributed under that licence,
+not under the JUCE application's AGPL licence. The complete pinned source,
+bridge-specific overrides and public build recipe accompany the source release.
+The helper links SDL2 (Zlib), asmjit (Zlib), SIMDe (MIT), pugixml (MIT), zlib
+(Zlib) and Berkeley SoftFloat (BSD-style); their notices are in ThirdParty.
+Source: https://github.com/danoon2/Boxedwine
+
+The embedded compatibility filesystem contains Wine 11.0 (LGPL 2.1 or later)
+and a TinyCore 15 userspace. Runtime component source archives, notices and
+build references accompany the source release in Dependencies/RuntimeSources.
+The filesystem is replaceable; the bridge does not prevent modification or
+replacement of its LGPL components. Source and binary identities are recorded
+in the accompanying runtime-source manifest.
+Sources: https://github.com/wine-mirror/wine and https://tinycorelinux.net/
+
+The bridge's Win32 guest uses the LLVM/MinGW runtime, with the LLVM Apache 2.0
+exception and MinGW runtime notices retained in ThirdParty. It contains no
+Roland code. Microsoft engine runtime DLLs are not included in our downloads;
+the optional engine downloader obtains the required files directly from Roland
+along with the owner's engine. Other supported owner-supplied Windows engines
+must retain their own runtime files beside SCCore.dll.
+
+On macOS, cabinet extraction uses the operating system's /usr/bin/tar utility
+to stream a fixed verified member, never an archive-controlled destination.

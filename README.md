@@ -1,11 +1,25 @@
 # Sound Canvas Bridge
 
+Windows and native Apple Silicon builds include a **Download from Roland** option
+beside Browse in **General** preferences. Native extraction selects the supported
+64-bit engine and app-local runtime on Windows, or the 32-bit engine and its runtime on Apple Silicon,
+without running either downloaded installer. Browse remains available if the download changes
+or disappears. Downloads and engine selection do not modify NKS files or previews.
+First launch and missing-engine recovery open General automatically. If a hosted
+plug-in has no engine, it directs you to the standalone app for setup; downloads
+never run inside the audio host.
+
 Mac AU/VST3 and Windows VST3 plug-ins, with a standalone MIDI module on both platforms, for **existing Sound Canvas VA owners**.
 Use the original installed synthesis engine in modern VST3 hosts on either platform.
-On Apple Silicon, Komplete Kontrol and Logic run natively while a separate helper
-runs the original Intel engine under Rosetta.
+On Apple Silicon, Komplete Kontrol and Logic run natively while a separate native
+compatibility worker runs your 32-bit Windows engine without Rosetta. Intel Mac
+hosts retain the original native Intel Mac engine backend.
 
-Version 1.3 improves installation and discovery, without changing the audio engine
+Version 1.4 adds a searchable in-plug-in sound browser, current
+program names, hosted keyboard-focus entry and grouped native preset files. Native
+VST3 factory browsing remains disabled to preserve channel-specific MIDI program
+changes; its own browser is available instead. These changes do not require new
+NKS files or previews. Version 1.3 improves installation and discovery, without changing the audio engine
 or the NKS catalogue. Version 1.2 added Windows x64 and All-parts sound-map support.
 Each platform has its own installer and update channel.
 
@@ -26,9 +40,12 @@ The same NKS download, mappings, previews and artwork work with both bridge buil
   other Windows versions remain unverified.
 - Your own legitimate, working Sound Canvas VA VST installation, including its
   original engine and ROM resources. No Roland binaries, ROMs or licences are supplied.
-- Mac only: Rosetta on Apple Silicon, for the separate Intel engine helper.
-- Advanced controls recognise the tested Sound Canvas VA 1.1.6 engine. Other engine
-  builds may provide basic playback only; the bridge reports that limitation.
+- Apple Silicon: a supported 32-bit Windows SCCore.dll, obtained from your own
+  installation or Download from Roland. Its runtime stays beside the engine,
+  outside our app and plug-ins. Native playback does not require Rosetta.
+- Intel Mac: the original Sound Canvas VA Mac VST installation and its core/ROM resources.
+- Advanced controls recognise the verified original and downloadable engines.
+  Unknown Windows engine builds are rejected rather than guessing their layouts.
 
 This is an independent OnjMusic project, not a Roland product or a replacement licence.
 It does not activate Sound Canvas VA or modify its installed files.
@@ -86,6 +103,31 @@ Command+Shift+M and Command+Shift+H. Other action shortcuts do not require Shift
 
 ## Guide and Limitations
 
+The Presets button opens the named sound browser. Filter by name, compatibility
+map and Programs/Drums; Enter loads the selected address and Escape returns to
+the controls. Searching alone does not change the sound. Selection preserves
+mixer/effect settings and uses an existing suitable MIDI part without changing
+its melodic/drum assignment. The standalone installs grouped native AU presets
+on Mac and VST3 presets on Windows; Help, Install DAW Presets can repeat this.
+Programs and Drums are directly inside the product folder, followed by sound
+map and melodic instrument family, without an extra Factory level. Custom
+presets can be kept alongside those two installer-managed groups. An unchanged
+older Factory folder is migrated only after its complete contents are verified.
+The AU no
+longer advertises a flat 2,958-entry menu. Host-specific folder presentation
+and previous/next shortcuts depend on that host's handling and configuration.
+Disk presets recall their default mixer/routing state; the internal browser
+preserves the current mixer/effects. User-edited native files are not overwritten.
+The Mac bank is AU-only in the standard AU folder, which Logic also discovers.
+An older generated duplicate in Logic's settings folder is retired only after
+its complete contents match the canonical bank. Existing redirected roots are
+resolved, not rewired; edited and unrelated banks remain untouched.
+The current-name selector above the controls loads adjacent sounds with Up/Down
+and announces their names. Enter opens the searchable browser. Browser rows use
+short names; F1 opens the full address details, and Escape returns to the same row.
+The VST3 retains one native program because JUCE's root factory list can otherwise
+reinterpret per-channel MIDI program changes as global factory selections.
+
 Read the [HTML guide](Resources/Manual.html), also available offline from the app's
 Help menu, and the [version history](Resources/VersionHistory.html).
 The separate [Windows guide](Resources/WindowsManual.html) describes the Windows
@@ -96,7 +138,8 @@ Windows MIDI Services virtual-port runtime is not distributed; existing physical
 or loopback MIDI inputs remain usable, without modifying their drivers/services.
 
 Very low buffer settings depend on the computer and host; start at 128 and increase
-if needed. Native Intel hardware and every macOS/host combination have not been
+if needed. The experimental 32-sample setting can lose samples under load; dense
+multi-part MIDI may need 512 samples. Native Intel hardware and every macOS/host combination have not been
 tested. Testing included native Apple Silicon and Intel/Rosetta slices, real Logic
 and Komplete Kontrol playback, physical MIDI, state recall and installer rollback.
 The current NKS pack was checked for cross-platform identities and paths, and
@@ -110,7 +153,10 @@ Insertion Type selects Thru or one of 64 native algorithms. All 20 parameter slo
 output sends and EQ routing are editable; Part MFX enables each part's routing to
 the shared effect. Parameter slots use raw values and numbers because their
 functions depend on the algorithm. The matching NKS mappings require bridge 1.1.0.
-Saved scenes preserve insertion settings and remain compatible with older scenes.
+Saved scenes preserve insertion settings and all 16 melodic/drum assignments.
+Older scenes load with their historical reset-default assignments. Default-role
+scenes retain the older encoding; custom assignments use scene version 3 and
+require the updated bridge to recall them correctly.
 The standalone receives MIDI, but is not a MIDI-file browser or onscreen keyboard.
 
 Update cleanup never forces a busy disk image to unmount. If macOS keeps a

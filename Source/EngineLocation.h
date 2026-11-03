@@ -1,25 +1,39 @@
 #pragma once
+#include "Backend.h"
 #include <juce_audio_utils/juce_audio_utils.h>
 #ifndef _WIN32
 #include <CoreFoundation/CoreFoundation.h>
+#ifdef SCBRIDGE_TRANSLATED_ENGINE
+#include <CommonCrypto/CommonDigest.h>
+#endif
 #endif
 #include "Performance.h"
+#include "CoreLayouts.h"
 
 namespace scbridge {
 class EngineLocation {
 public:
+    static const char* preferenceKey() {
+#if defined(SCBRIDGE_TRANSLATED_ENGINE) && !defined(_WIN32)
+        return "windows32CorePath";
+#else
+        return "bundlePath";
+#endif
+    }
     explicit EngineLocation(juce::File config=performanceFile().getSiblingFile("Engine.xml"))
         :file(std::move(config)),lock("OnjSoundCanvasEngine-"+juce::String(file.getFullPathName().hashCode64())),properties(file,options()) {}
     static juce::File systemBundle() {
 #ifdef _WIN32
         return juce::File::getSpecialLocation(juce::File::globalApplicationsDirectory)
             .getChildFile("Roland/SOUND Canvas VA/SCCore.dll");
+#elif defined(SCBRIDGE_TRANSLATED_ENGINE)
+        return juce::File("/Library/Application Support/OnjMusic/SoundCanvasBridge/Engine/SCCore.dll");
 #else
         return juce::File("/Library/Audio/Plug-Ins/VST/SOUND Canvas VA.vst");
 #endif
     }
     juce::File bundle() const {
-        const auto saved=properties.getValue("bundlePath");
+        const auto saved=properties.getValue(preferenceKey());
         if(saved.isNotEmpty()) return juce::File(saved);
         juce::String error;
         if(validate(systemBundle(),error)) return systemBundle();
@@ -30,6 +44,8 @@ public:
             if(validate(candidate,error)) return candidate;
         }
         return systemBundle();
+#elif defined(SCBRIDGE_TRANSLATED_ENGINE)
+        return systemBundle();
 #else
         const auto user=juce::File::getSpecialLocation(juce::File::userHomeDirectory).getChildFile("Library/Audio/Plug-Ins/VST/SOUND Canvas VA.vst");
         return validate(user,error) ? user : systemBundle();
@@ -39,7 +55,7 @@ public:
     juce::File core() const {
         const auto selected=bundle();juce::String error;
         if(!validate(selected,error)) return {};
-#ifdef _WIN32
+#if defined(_WIN32) || defined(SCBRIDGE_TRANSLATED_ENGINE)
         return selected;
 #else
         return selected.getChildFile("Contents/Resources/SCCore00.dylib");
@@ -48,22 +64,38 @@ public:
     bool save(const juce::File& selected,juce::String& error) {
         if(!validate(selected,error)) return false;
         if(!lock.enter(200)) { error="The engine setting is busy. Try again.";return false; }
-        properties.reload();properties.setValue("bundlePath",selected.getFullPathName());
+        properties.reload();properties.setValue(preferenceKey(),selected.getFullPathName());
         const bool saved=properties.saveIfNeeded();lock.exit();
         if(!saved) error="Could not save the Sound Canvas VA location.";
         return saved;
     }
     static bool validate(const juce::File& selected,juce::String& error) {
+#if defined(_WIN32) || defined(SCBRIDGE_TRANSLATED_ENGINE)
 #ifdef _WIN32
         error="Choose the original 64-bit Sound Canvas VA SCCore.dll from your own installation.";
+        constexpr uint16_t machine=0x8664,optionalMagic=0x20b;
+#else
+        error="Choose the 32-bit Sound Canvas VA SCCore.dll from your own Windows installation, not the 64-bit DLL or Mac VST.";
+        constexpr uint16_t machine=0x014c,optionalMagic=0x10b;
+#endif
         if(!selected.existsAsFile() || selected.getFileName().compareIgnoreCase("SCCore.dll") ||
            selected.getSize()<4096 || selected.getSize()>64*1024*1024) return false;
         juce::FileInputStream stream(selected);
         if(!stream.openedOk() || stream.readShort()!=0x5a4d || !stream.setPosition(0x3c)) return false;
         const auto header=static_cast<uint32_t>(stream.readInt());
         if(header>static_cast<uint64_t>(selected.getSize()-26) || !stream.setPosition(header) ||
-           stream.readInt()!=0x00004550 || static_cast<uint16_t>(stream.readShort())!=0x8664 ||
-           !stream.setPosition(header+24) || static_cast<uint16_t>(stream.readShort())!=0x20b) return false;
+           stream.readInt()!=0x00004550 || static_cast<uint16_t>(stream.readShort())!=machine ||
+           !stream.setPosition(header+24) || static_cast<uint16_t>(stream.readShort())!=optionalMagic) return false;
+#ifndef _WIN32
+        juce::MemoryBlock bytes;
+        if(!selected.loadFileAsData(bytes)) return false;
+        unsigned char digest[CC_SHA256_DIGEST_LENGTH]{};
+        CC_SHA256(bytes.getData(),static_cast<CC_LONG>(bytes.getSize()),digest);
+        const auto actual=juce::String::toHexString(digest,sizeof(digest),0);
+        if(!windowsCoreLayout(actual.toRawUTF8(),32)) {
+            error="This 32-bit Sound Canvas engine version is not supported by the experimental backend.";return false;
+        }
+#endif
         error.clear();return true;
 #else
         error="Choose the original Sound Canvas VA VST bundle, including its companion resources.";

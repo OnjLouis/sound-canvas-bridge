@@ -16,7 +16,9 @@ inline bool updateCheckDue(CheckFrequency frequency,int64_t last,int64_t now,boo
 class AppPreferences {
 public:
     explicit AppPreferences(juce::File path=performanceFile().getSiblingFile("Application.xml"))
-        :file(std::move(path)),properties(file,options()) {}
+        :file(std::move(path)),firstLaunch(!file.existsAsFile()),properties(file,options()) {}
+    bool isFirstLaunch() const { return firstLaunch; }
+    static bool shouldShowEngineSetup(bool first,bool engineReady) { return first || !engineReady; }
     CheckFrequency frequency() const {
         const auto value=properties.getIntValue("updateFrequency",4);
         return value>=1 && value<=4 ? static_cast<CheckFrequency>(value) : CheckFrequency::daily;
@@ -42,6 +44,7 @@ private:
         result.storageFormat=juce::PropertiesFile::storeAsXML;return result;
     }
     juce::File file;
+    const bool firstLaunch;
     juce::PropertiesFile properties;
 };
 }

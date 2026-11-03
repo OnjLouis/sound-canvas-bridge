@@ -1,0 +1,177 @@
+name: BoxedWineMacCore
+options:
+  deploymentTarget:
+    macOS: "12.0"
+settings:
+  base:
+    CLANG_CXX_LANGUAGE_STANDARD: c++20
+    GCC_C_LANGUAGE_STANDARD: gnu11
+    GCC_PREPROCESSOR_DEFINITIONS:
+      - SIMDE_NO_NATIVE
+      - BOXEDWINE_64
+      - BOXEDWINE_MAC_JIT
+      - ASMJIT_STATIC
+      - BOXEDWINE_ZLIB
+      - BOXEDWINE_POSIX
+      - BOXEDWINE_MULTI_THREADED
+      - BOXEDWINE_DISABLE_UI
+      - SDL2=1
+      - __MACOSX_CORE__
+      - main=BoxedWineExecutableMain
+    HEADER_SEARCH_PATHS:
+      - @BOXEDWINE_SOURCE@/lib/asmjit
+      - @BUILD_ROOT@
+      - @BOXEDWINE_SOURCE@/include
+      - @BOXEDWINE_SOURCE@/lib/sdl2/include
+      - @BOXEDWINE_SOURCE@/lib/simde
+      - @BOXEDWINE_SOURCE@/lib/pugixml/src
+      - @BOXEDWINE_SOURCE@/lib/zlib
+      - @BOXEDWINE_SOURCE@/lib/zlib/contrib/minizip
+      - @BOXEDWINE_SOURCE@/lib/softfloat/source/include
+      - @BOXEDWINE_SOURCE@/lib/softfloat/source
+      - @BOXEDWINE_SOURCE@/lib/softfloat/source/8086-SSE
+    OTHER_CPLUSPLUSFLAGS:
+      - $(inherited)
+      - -ffile-prefix-map=@BUILD_ROOT@=.
+      - -Wno-invalid-offsetof
+      - -Wno-delete-incomplete
+      - -Wno-unused-result
+      - -Wno-unknown-pragmas
+    OTHER_CFLAGS:
+      - $(inherited)
+      - -ffile-prefix-map=@BUILD_ROOT@=.
+targets:
+  SDLHeadless:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src
+        buildPhase: sources
+        includes: ["*.c"]
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/atomic
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/audio
+        buildPhase: sources
+        includes: ["*.c"]
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/audio/dummy
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/cpuinfo
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/dynapi
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/events
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/file
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/filesystem/cocoa
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/haptic
+        buildPhase: sources
+        includes: ["*.c"]
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/haptic/dummy
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/joystick
+        buildPhase: sources
+        includes: ["*.c"]
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/joystick/dummy
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/libm
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/loadso/dlopen
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/power
+        buildPhase: sources
+        includes: ["*.c"]
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/render
+        buildPhase: sources
+        includes: ["*.c"]
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/render/software
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/sensor
+        buildPhase: sources
+        includes: ["*.c"]
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/sensor/dummy
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/stdlib
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/thread
+        buildPhase: sources
+        includes: ["*.c"]
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/thread/pthread
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/timer
+        buildPhase: sources
+        includes: ["*.c"]
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/timer/unix
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/video
+        buildPhase: sources
+        includes: ["*.c"]
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/video/dummy
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/lib/sdl2/src/video/yuv2rgb
+        buildPhase: sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.onj.soundcanvasbridge.sdlheadless
+        SKIP_INSTALL: YES
+        APPLICATION_EXTENSION_API_ONLY: YES
+        GCC_PREPROCESSOR_DEFINITIONS: [BOXEDWINE_SDL_HEADLESS=1]
+        HEADER_SEARCH_PATHS:
+          - @BOXEDWINE_SOURCE@/lib/sdl2/include
+          - @BOXEDWINE_SOURCE@/lib/sdl2/src
+  BoxedWineMacCore:
+    type: library.static
+    platform: macOS
+    sources:
+      - path: @BOXEDWINE_SOURCE@/lib/asmjit/asmjit
+        buildPhase: sources
+      - path: BoxedWineIOSStubs.cpp
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/source
+        buildPhase: sources
+        excludes:
+          - test
+          - ui
+          - opengl
+          - vulkan
+          - emulation/cpu/armv7
+          - emulation/cpu/wasm
+          - sdl/emscripten
+          - util/networkutils.cpp
+      - path: @BOXEDWINE_SOURCE@/platform/linux
+        buildPhase: sources
+        excludes: [platformOpenGL.cpp]
+      - path: @BOXEDWINE_SOURCE@/platform/sdl
+        buildPhase: sources
+        excludes: [knativescreenGL.cpp, kvulkanSDL.cpp]
+      - path: @BOXEDWINE_SOURCE@/lib/pugixml/src
+        buildPhase: sources
+      - path: @BOXEDWINE_SOURCE@/lib/zlib/contrib/minizip
+        buildPhase: sources
+        excludes: [iowin32.c, miniunz.c, minizip.c]
+      - path: @BOXEDWINE_SOURCE@/lib/softfloat/source
+        buildPhase: sources
+        excludes:
+          - specialize/**
+          - ARM-VFPv2/**
+          - ARM-VFPv2-defaultNaN/**
+          - RISCV/**
+          - 8086/**
+          - 8086-SSE/**
+          - ARM/**
+      - path: @BOXEDWINE_SOURCE@/lib/softfloat/source/8086-SSE
+        buildPhase: sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: me.onj.soundcanvasbridge.boxedwinemaccore
+        SKIP_INSTALL: YES
+schemes:
+  SDLHeadless:
+    build:
+      targets:
+        SDLHeadless: all
+  BoxedWineMacCore:
+    build:
+      targets:
+        BoxedWineMacCore: all
