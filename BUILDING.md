@@ -18,6 +18,11 @@ The versioned source ZIP includes the SDK used for the release at
 `Dependencies/ASIO/ASIOSDK`. Point `ASIO_SDK_DIR` there when building from that
 archive. Its licence is included; no audio-interface driver is supplied.
 
+The `WindowsInstallerWorkingDirectory` test embeds a dummy wizard in the real
+installer launcher and starts it from a disposable installation directory. It
+checks directory replacement and staging cleanup without installing anything,
+requesting elevation or changing user settings.
+
 The standalone output is under `build/SoundCanvasStandalone_artefacts/Release`;
 the VST3 bundle is under `build/SoundCanvasBridge_artefacts/Release/VST3`. The
 maintenance executable contains only the public update-verification key. Normal

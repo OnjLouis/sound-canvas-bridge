@@ -25,6 +25,9 @@ namespace OnjMusic.SoundCanvas {
                 string root=Path.Combine(Path.GetTempPath(),"OnjMusic-SoundCanvasSetup");
                 if(Directory.Exists(root) && (File.GetAttributes(root)&FileAttributes.ReparsePoint)!=0) throw new IOException("The setup temporary folder is redirected.");
                 Directory.CreateDirectory(root);folder=Path.Combine(root,Guid.NewGuid().ToString("N"));Directory.CreateDirectory(folder);
+                // The updater may start us inside the installation being replaced.
+                // Our waiting process must not keep that directory open.
+                Environment.CurrentDirectory=root;
                 wizard=Path.Combine(folder,"Setup.exe");
                 using(var input=Assembly.GetExecutingAssembly().GetManifestResourceStream("Wizard")) {
                     if(input==null || input.Length<1 || input.Length>192*1024*1024) throw new InvalidDataException("The setup wizard is missing or invalid.");
@@ -34,7 +37,7 @@ namespace OnjMusic.SoundCanvas {
                     // The wizard owns one elevation request. The wrapper remains
                     // unelevated, waits for completion, then removes its own stage.
                     string command=String.Join(" ",Array.ConvertAll(arguments,Quote));
-                    using(var child=Process.Start(new ProcessStartInfo(wizard,command) { UseShellExecute=true })) {
+                    using(var child=Process.Start(new ProcessStartInfo(wizard,command) { UseShellExecute=true,WorkingDirectory=folder })) {
                         child.WaitForExit();return child.ExitCode;
                     }
                 }

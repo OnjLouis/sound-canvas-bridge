@@ -105,9 +105,16 @@ int main(int argc,char** argv) {
     auto* open=dynamic_cast<juce::TextButton*>(editor->findChildWithID("browsePresets"));
     if(!open || !open->onClick) { std::cerr<<"FAIL: named preset browser command missing\n";return 1; }
     const auto* browseAccessibility=open->getAccessibilityHandler();
-    if(!browseAccessibility || !browseAccessibility->getHelp().contains("compatibility map")) {
+    if(!browseAccessibility || !scbridge::contextHelp(*open).contains("compatibility map")) {
         std::cerr<<"FAIL: Browse presets must expose native accessibility help\n";return 1;
     }
+#ifdef _WIN32
+    if(browseAccessibility->getHelp().isNotEmpty()) {
+        std::cerr<<"FAIL: Windows browser command must reserve instructions for F1\n";return 1;
+    }
+#else
+    if(!browseAccessibility->getHelp().contains("compatibility map")) return 1;
+#endif
     open->onClick();
     scbridge::ProgramBrowser* browser=nullptr;
     for(auto* child:editor->getChildren()) if(auto* candidate=dynamic_cast<scbridge::ProgramBrowser*>(child)) browser=candidate;
@@ -154,9 +161,16 @@ int main(int argc,char** argv) {
     if(processor->getCurrentProgram()!=1 || name->getText()!="UprightPiano" || !value || value->getCurrentValueAsString()!="UprightPiano") {
         std::cerr<<"FAIL: main preset selector Down must expose the new sound name to accessibility\n";return 1;
     }
-    if(!selectorAccessibility->getHelp().contains("Up and Down")) {
+    if(!scbridge::contextHelp(*name).contains("Up and Down")) {
         std::cerr<<"FAIL: preset selector must expose native accessibility help\n";return 1;
     }
+#ifdef _WIN32
+    if(selectorAccessibility->getHelp().isNotEmpty()) {
+        std::cerr<<"FAIL: Windows preset selector must reserve instructions for F1\n";return 1;
+    }
+#else
+    if(!selectorAccessibility->getHelp().contains("Up and Down")) return 1;
+#endif
     if(name->getProperties()["lastKeyboardAnnouncement"].toString()!="Current sound, UprightPiano") {
         std::cerr<<"FAIL: preset arrows must request the native spoken-value announcement\n";return 1;
     }

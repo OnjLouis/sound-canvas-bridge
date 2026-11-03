@@ -130,7 +130,7 @@ function RunWorker(const Executable, Arguments: String): Boolean;
 var
   ExitCode: Integer;
 begin
-  Result := Exec(Executable, Arguments, '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+  Result := Exec(Executable, Arguments, ExpandConstant('{tmp}'), SW_HIDE, ewWaitUntilTerminated, ExitCode);
   Result := Result and (ExitCode = 0);
 end;
 

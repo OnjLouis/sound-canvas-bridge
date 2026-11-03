@@ -561,7 +561,7 @@ namespace OnjMusic.SoundCanvas {
                 if(arguments.Length==2 && arguments[0]=="--check") {
                     var release=Latest(arguments[1]);WriteReply(release==null ? (object)new { status="current",message="No newer published Windows release is available." } : new { status="available",release=release });return 0;
                 }
-                if(arguments.Length==2 && arguments[0]=="--prepare-base64") { WriteReply(Prepare(arguments[1],Version,Download,path=>Process.Start(new ProcessStartInfo(path) {UseShellExecute=true}),Updates));return 0; }
+                if(arguments.Length==2 && arguments[0]=="--prepare-base64") { WriteReply(Prepare(arguments[1],Version,Download,path=>Process.Start(new ProcessStartInfo(path) {UseShellExecute=true,WorkingDirectory=Path.GetDirectoryName(path)}),Updates));return 0; }
                 bool setupCommand=arguments.Length==2 && new[]{"--setup-apply","--setup-seal","--setup-commit","--setup-rollback"}.Contains(arguments[0]);
                 if(setupCommand || arguments.Length==1 && new[]{"--apply","--uninstall"}.Contains(arguments[0])) {
                     int ownerPid=0;

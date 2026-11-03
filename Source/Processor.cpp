@@ -153,13 +153,19 @@ public:
         };
         browse.getProperties().set(scbridge::explicitHelpProperty,
             "Browse the named programs and drum kits by compatibility map. Loading a sound preserves mixer and effects settings and existing melodic/drum assignments.");
-        browse.setHelpText(scbridge::contextHelp(browse));browse.setTooltip(browse.getHelpText());
+#ifndef _WIN32
+        browse.setHelpText(scbridge::contextHelp(browse));
+        browse.setTooltip(scbridge::contextHelp(browse));
+#endif
         addAndMakeVisible(browse);
         currentSound.setComponentID("currentSound");currentSound.setName("Current sound");currentSound.setTitle("Current sound");
         currentSound.setWantsKeyboardFocus(true);currentSound.setExplicitFocusOrder(3);
         currentSound.getProperties().set(scbridge::explicitHelpProperty,
             "Up and Down load the previous or next named sound in the current map and sound type. Enter opens the searchable browser. F1 shows the selected sound's address.");
-        currentSound.setHelpText(scbridge::contextHelp(currentSound));currentSound.setTooltip(currentSound.getHelpText());
+#ifndef _WIN32
+        currentSound.setHelpText(scbridge::contextHelp(currentSound));
+        currentSound.setTooltip(scbridge::contextHelp(currentSound));
+#endif
         currentSound.onBrowse=[this] { browse.onClick(); };
         currentSound.onDetails=[this] { browse.onClick();browser.keyPressed(juce::KeyPress(juce::KeyPress::F1Key)); };
         currentSound.onChange=[this,selectProgram] {
