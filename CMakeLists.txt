@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET 12.0 CACHE STRING "Minimum macOS version")
 endif()
-project(OnjSoundCanvasPilot VERSION 1.2.0 LANGUAGES C CXX)
+project(OnjSoundCanvasPilot VERSION 1.3.0 LANGUAGES C CXX)
 if(APPLE)
     enable_language(OBJCXX)
 elseif(NOT WIN32)
@@ -124,6 +124,7 @@ else()
     add_custom_target(SoundCanvasMaintenanceBuild DEPENDS "${CMAKE_BINARY_DIR}/SoundCanvasMaintenance.exe")
     set(SCBRIDGE_INSTALLER_INPUT "" CACHE PATH "Folder containing payload.zip and signed manifest.json/manifest.sig")
     if(SCBRIDGE_INSTALLER_INPUT)
+        find_program(SCBRIDGE_ISCC NAMES ISCC.exe ISCC REQUIRED)
         foreach(name payload.zip manifest.json manifest.sig)
             if(NOT EXISTS "${SCBRIDGE_INSTALLER_INPUT}/${name}")
                 message(FATAL_ERROR "Missing signed installer input: ${name}")
@@ -133,13 +134,23 @@ else()
         file(TO_NATIVE_PATH "${SCBRIDGE_INSTALLER_INPUT}/manifest.json" installer_manifest)
         file(TO_NATIVE_PATH "${SCBRIDGE_INSTALLER_INPUT}/manifest.sig" installer_signature)
         file(TO_NATIVE_PATH "${CMAKE_BINARY_DIR}/SoundCanvasBridge-${PROJECT_VERSION}-windows-x64.exe" installer_output)
+        file(TO_NATIVE_PATH "${CMAKE_BINARY_DIR}/PayloadInstaller.exe" installer_worker)
+        file(TO_NATIVE_PATH "${SOURCE}/WindowsSetupBootstrap.cs" installer_bootstrap_source)
+        file(TO_NATIVE_PATH "${CMAKE_BINARY_DIR}/Wizard/SoundCanvasBridge-${PROJECT_VERSION}-windows-x64.exe" installer_wizard)
         add_custom_target(SoundCanvasWindowsInstaller
             COMMAND "${SCBRIDGE_CSC}" /nologo /target:winexe /platform:x64 /optimize+ /utf8output
                 /r:System.dll /r:System.Core.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll
                 /r:System.Web.Extensions.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll /r:Microsoft.CSharp.dll
                 "/resource:${SCBRIDGE_MAINTENANCE_KEY},WindowsUpdateKey"
                 "/resource:${installer_payload},Payload" "/resource:${installer_manifest},Manifest" "/resource:${installer_signature},Signature"
-                "/out:${installer_output}" "${SCBRIDGE_MAINTENANCE_SOURCE}" "${SCBRIDGE_MAINTENANCE_VERSION}"
+                "/out:${installer_worker}" "${SCBRIDGE_MAINTENANCE_SOURCE}" "${SCBRIDGE_MAINTENANCE_VERSION}"
+            COMMAND "${SCBRIDGE_ISCC}" "/DBridgeVersion=${PROJECT_VERSION}"
+                "/DPayloadWorker=${installer_worker}" "/DMaintenanceWorker=${SCBRIDGE_MAINTENANCE_OUTPUT}"
+                "/DInstallerOutput=${CMAKE_BINARY_DIR}/Wizard" "${CMAKE_CURRENT_SOURCE_DIR}/Resources/WindowsInstaller.iss"
+            COMMAND "${SCBRIDGE_CSC}" /nologo /target:winexe /platform:x64 /optimize+ /utf8output
+                /r:System.dll /r:System.Windows.Forms.dll
+                "/resource:${installer_wizard},Wizard"
+                "/out:${installer_output}" "${installer_bootstrap_source}" "${SCBRIDGE_MAINTENANCE_VERSION}"
             DEPENDS SoundCanvasMaintenanceBuild VERBATIM)
     endif()
     option(SCBRIDGE_BUILD_EXPERIMENTAL_MIDI "Build the development-only Windows MIDI Services helper" OFF)

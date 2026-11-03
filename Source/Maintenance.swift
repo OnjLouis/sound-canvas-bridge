@@ -407,6 +407,29 @@ enum Maintenance {
         })
     }
 
+    struct QuitTarget {
+        let description: String
+        let request: () -> Bool
+        let hasStopped: () -> Bool
+    }
+
+    static func closeStandalone(_ targets: [QuitTarget], timeout: TimeInterval = 30,
+                                now: () -> Date = { Date() },
+                                pump: () -> Void = { RunLoop.current.run(until: Date().addingTimeInterval(0.05)) }) throws {
+        for target in targets where !target.hasStopped() {
+            InstallerLog.write("Requesting standalone quit: \(target.description).")
+            guard target.request() else {
+                throw MaintenanceError.failed("The standalone application could not close. Stop playback and quit Sound Canvas Bridge, then try again. Nothing was installed.")
+            }
+        }
+        let deadline = now().addingTimeInterval(timeout)
+        while targets.contains(where: { !$0.hasStopped() }) && now() < deadline { pump() }
+        guard targets.allSatisfy({ $0.hasStopped() }) else {
+            throw MaintenanceError.failed("The standalone application did not close in time. Quit Sound Canvas Bridge and try again. Nothing was installed.")
+        }
+        InstallerLog.write("Standalone shutdown verified; \(targets.count) application(s) closed. Audio hosts were not asked to quit.")
+    }
+
     static func installer(updateStage: URL?) throws -> [String: Any] {
         // The installer runs from its mounted update, so a separate helper must
         // wait for this process to exit before unmounting, including on Cancel.
@@ -440,12 +463,14 @@ enum Maintenance {
         guard dialog.show() else { InstallerLog.write("Installation cancelled before changes."); return ["status": "cancelled"] }
         InstallerLog.write("Install selected.")
         let running = NSRunningApplication.runningApplications(withBundleIdentifier: appID)
-        for item in running { guard item.terminate() else { throw MaintenanceError.failed("The standalone application could not close. Nothing was installed.") } }
-        let deadline = Date().addingTimeInterval(30)
-        while running.contains(where: { !$0.isTerminated }) && Date() < deadline {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        for item in running {
+            guard let bundle = item.bundleURL else { throw MaintenanceError.failed("Could not identify the running standalone application. Quit it before installing.") }
+            try verify(bundle, id: appID)
         }
-        guard running.allSatisfy(\.isTerminated) else { throw MaintenanceError.failed("The standalone application did not close in time. Nothing was installed.") }
+        try closeStandalone(running.map { item in
+            QuitTarget(description: "Sound Canvas Bridge, PID \(item.processIdentifier)",
+                       request: { item.terminate() }, hasStopped: { item.isTerminated })
+        })
         let command = quote(Bundle.main.executableURL!.path) + " --apply " + quote(payload.path) + " " + quote(version)
         let progress = InstallerDialog(title: "Installing Sound Canvas Bridge", message: "Waiting for administrator authorisation, then installing all three formats.\n\nThe installed files are backed up before replacement. If replacement fails, the installer restores them.\n\nPlease leave this window open until the operation finishes.", primaryTitle: "Installing...", progress: true)
         var outcome: Result<Data, Error>?
@@ -535,6 +560,19 @@ enum Maintenance {
         return ["status": "verified", "version": version, "productionTrustChecks": true]
     }
     static func selfTest() throws -> [String: Any] {
+        var quitRequests = 0
+        var stopped = false
+        let target = QuitTarget(description: "test standalone", request: { quitRequests += 1; return true }, hasStopped: { stopped })
+        try closeStandalone([target], pump: { stopped = true })
+        guard quitRequests == 1, stopped else { throw MaintenanceError.failed("Standalone quit was not requested and verified.") }
+        try closeStandalone([])
+        try closeStandalone([target])
+        guard quitRequests == 1 else { throw MaintenanceError.failed("An already stopped application was asked to quit again.") }
+        let refused = QuitTarget(description: "refused test", request: { false }, hasStopped: { false })
+        do { try closeStandalone([refused]); throw MaintenanceError.failed("Refused quit accepted.") }
+        catch MaintenanceError.failed(let text) where text.contains("could not close") { }
+        do { try closeStandalone([QuitTarget(description: "stalled test", request: { true }, hasStopped: { false })], timeout: 0); throw MaintenanceError.failed("Stalled quit accepted.") }
+        catch MaintenanceError.failed(let text) where text.contains("did not close in time") { }
         guard try replyData(["status": "error", "message": String(repeating: "x", count: 8192)]).count <= maximumReplyBytes else {
             throw MaintenanceError.failed("An oversized helper reply can block the parent output pipe.")
         }
@@ -603,6 +641,14 @@ let maintenanceArguments = Array(CommandLine.arguments.dropFirst())
 do {
     let args = maintenanceArguments
     #if SCB_MAINTENANCE_TESTS
+    if args.count == 3 && args[0] == "--test-close", let pid = Int32(args[1]),
+       let item = NSRunningApplication(processIdentifier: pid), item.bundleIdentifier == Maintenance.appID,
+       item.bundleURL?.standardizedFileURL == URL(fileURLWithPath: args[2]).standardizedFileURL {
+        try Maintenance.closeStandalone([Maintenance.QuitTarget(description: "test standalone PID \(pid)",
+            request: { item.terminate() }, hasStopped: { item.isTerminated })])
+        print("PASS native standalone quit and exit verification")
+        exit(0)
+    }
     if args == ["--self-test"] {
         FileHandle.standardOutput.write(try JSONSerialization.data(withJSONObject: Maintenance.selfTest(), options: [.sortedKeys])); print(""); exit(0)
     }

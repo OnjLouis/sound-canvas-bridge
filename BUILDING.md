@@ -25,7 +25,8 @@ The development-only `SCBRIDGE_BUILD_EXPERIMENTAL_MIDI` option is off by default
 It requires the official preview SDK and does not resolve the documented Windows
 service teardown bug. Do not include that preview runtime in release packages.
 
-The full installer compiles the same `Source/MaintenanceWindows.cs` with three
+The full installer requires Inno Setup 7.1.1 (set `SCBRIDGE_ISCC` to its compiler
+if it is not on PATH). It compiles `Source/MaintenanceWindows.cs` with three
 embedded inputs: `payload.zip`, `manifest.json` and binary `manifest.sig`. The ZIP
 contains only `Application/` and `VST3/` files. The UTF-8 manifest has `product`,
 `version` and `files` fields; each file has `path`, byte `size` and lowercase SHA256
@@ -34,9 +35,19 @@ contains only `Application/` and `VST3/` files. The UTF-8 manifest has `product`
 Given an already signed input folder, build it with:
 
 ```powershell
-cmake -S . -B build -DSCBRIDGE_INSTALLER_INPUT=C:/signed-payload
+cmake -S . -B build -DSCBRIDGE_INSTALLER_INPUT=C:/signed-payload -DSCBRIDGE_ISCC="C:/path/to/ISCC.exe"
 cmake --build build --target SoundCanvasWindowsInstaller
 ```
+
+`Resources/WindowsInstaller.iss` supplies the standard wizard and owns shortcut
+and uninstall registration. The signed worker replaces both components and
+retains recovery copies until the wizard commits. Setup support lives in a
+separate shared folder so it is not mistaken for signed app payload. The
+uninstaller delegates verified component removal to the maintenance worker;
+it never recursively deletes user content or settings.
+The small `WindowsSetupBootstrap.cs` container retains the exact version-resource
+format required by older updaters and launches the embedded Inno wizard without
+custom UI. Sign the complete outer EXE only after this final packaging step.
 
 The installer is `SoundCanvasBridge-VERSION-windows-x64.exe`. The updater selects
 only stable `windows-vVERSION` releases with that asset and a detached `.exe.sig`

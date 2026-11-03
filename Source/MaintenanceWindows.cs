@@ -21,7 +21,7 @@ namespace OnjMusic.SoundCanvas {
     public sealed class Entry { public string path; public long size; public string sha256; }
     public sealed class Manifest { public string product; public string version; public Entry[] files; }
     public sealed class Release { public string version; public string asset; public string download; public string page; public string notes; }
-    public sealed class Transaction { public string id; public bool committed; public bool remove; public bool[] existed; }
+    public sealed class Transaction { public string id; public bool committed; public bool sealedPayload; public bool remove; public bool[] existed; public int ownerPid; public long ownerStart; }
 
     internal static class Maintenance {
         const string Product="Sound Canvas Bridge", Repository="OnjLouis/sound-canvas-bridge";
@@ -231,11 +231,23 @@ namespace OnjMusic.SoundCanvas {
             File.WriteAllText(temporary,Json.Serialize(transaction),new UTF8Encoding(false));
             if(File.Exists(journal)) File.Replace(temporary,journal,null);else File.Move(temporary,journal);
         }
-        static void Recover(string[] roots,string journal,string key) {
-            Plain(journal);if(!File.Exists(journal)) return;
+        static Transaction ReadTransaction(string journal,int ownerPid=0) {
+            Plain(journal);
             if(new FileInfo(journal).Length>4096) throw new IOException("Recovery journal is invalid.");
             var transaction=Json.Deserialize<Transaction>(File.ReadAllText(journal));
-            if(transaction==null || !Regex.IsMatch(transaction.id??"","^[a-f0-9]{32}$") || transaction.existed==null || transaction.existed.Length!=2) throw new IOException("Recovery journal is invalid.");
+            if(transaction==null || !Regex.IsMatch(transaction.id??"","^[a-f0-9]{32}$") || transaction.existed==null || transaction.existed.Length!=2 || transaction.ownerPid<0)
+                throw new IOException("Recovery journal is invalid.");
+            if(transaction.ownerPid>0 && transaction.ownerPid!=ownerPid) {
+                try { using(var owner=Process.GetProcessById(transaction.ownerPid)) {
+                    if(owner.StartTime.ToUniversalTime().Ticks==transaction.ownerStart)
+                        throw new IOException("Another setup wizard is still running.");
+                } } catch(ArgumentException) { }
+            }
+            return transaction;
+        }
+        static void Recover(string[] roots,string journal,string key,int ownerPid=0) {
+            Plain(journal);if(!File.Exists(journal)) return;
+            var transaction=ReadTransaction(journal,ownerPid);
             if(transaction.committed && !transaction.remove) for(int i=0;i<2;++i) ValidateTree(roots[i],i,key,true);
             for(int i=1;i>=0;--i) {
                 string backup=Sibling(roots[i],transaction.id,".rollback"),stage=Sibling(roots[i],transaction.id,".stage");
@@ -249,9 +261,30 @@ namespace OnjMusic.SoundCanvas {
             }
             File.Delete(journal);
         }
-        static void Apply(Package package,string[] roots,string journal,bool remove=false,int failAfter=-1,bool secure=false) {
-            Plain(journal);Directory.CreateDirectory(Path.GetDirectoryName(journal));Recover(roots,journal,package.key);
-            var transaction=new Transaction { id=Guid.NewGuid().ToString("N"),existed=roots.Select(Directory.Exists).ToArray(),remove=remove };
+        static void SealSetup(string[] roots,string journal,string key,int ownerPid=0) {
+            Plain(journal);var transaction=ReadTransaction(journal,ownerPid);
+            for(int i=0;i<2;++i) ValidateTree(roots[i],i,key,true);
+            if(transaction.remove) throw new IOException("Recovery journal is invalid.");
+            transaction.sealedPayload=true;WriteJournal(journal,transaction);
+        }
+        static void FinishSetup(string[] roots,string journal,string key,bool commit,int ownerPid=0) {
+            Plain(journal);if(!File.Exists(journal)) return;
+            var transaction=ReadTransaction(journal,ownerPid);
+            if(commit) {
+                SealSetup(roots,journal,key,ownerPid);
+                transaction.sealedPayload=true;transaction.committed=true;WriteJournal(journal,transaction);
+            }
+            else if(transaction.committed) {
+                // The wizard may fail after validation but before registration.
+                // Keep both backups until its success callback has run.
+                transaction.committed=false;WriteJournal(journal,transaction);
+            }
+            Recover(roots,journal,key,ownerPid);
+        }
+        static void Apply(Package package,string[] roots,string journal,bool remove=false,int failAfter=-1,bool secure=false,bool deferCommit=false,int ownerPid=0) {
+            Plain(journal);Directory.CreateDirectory(Path.GetDirectoryName(journal));Recover(roots,journal,package.key,ownerPid);
+            var transaction=new Transaction { id=Guid.NewGuid().ToString("N"),existed=roots.Select(Directory.Exists).ToArray(),remove=remove,ownerPid=ownerPid };
+            if(ownerPid>0) using(var owner=Process.GetProcessById(ownerPid)) transaction.ownerStart=owner.StartTime.ToUniversalTime().Ticks;
             var stages=roots.Select(root=>Sibling(root,transaction.id,".stage")).ToArray();
             for(int i=0;i<2;++i) {
                 Plain(roots[i]);Directory.CreateDirectory(Path.GetDirectoryName(roots[i]));
@@ -284,10 +317,11 @@ namespace OnjMusic.SoundCanvas {
                     if(!remove) { Directory.Move(stages[i],roots[i]);ValidateTree(roots[i],i,package.key,true); }
                     if(i==failAfter) throw new IOException("Injected transaction failure");
                 }
-                transaction.committed=true;WriteJournal(journal,transaction);
-            } catch { Recover(roots,journal,package.key);throw; }
+                if(!deferCommit) { transaction.committed=true;WriteJournal(journal,transaction); }
+            } catch { Recover(roots,journal,package.key,ownerPid);throw; }
+            if(deferCommit) return;
             // A cleanup failure is recoverable on the next run, never a reason to undo a verified commit.
-            Recover(roots,journal,package.key);
+            Recover(roots,journal,package.key,ownerPid);
         }
         static bool ReleaseVersion(string text,out System.Version parsed) {
             parsed=null;return Regex.IsMatch(text??"","^[0-9]{1,5}\\.[0-9]{1,5}\\.[0-9]{1,5}$") && System.Version.TryParse(text,out parsed);
@@ -404,48 +438,45 @@ namespace OnjMusic.SoundCanvas {
         static ProcessStartInfo OpenBridgeInfo() {
             return new ProcessStartInfo(Path.Combine(SharedApp,Product+".exe")) { UseShellExecute=true };
         }
-        static void ShowInstaller() {
-            var package=EmbeddedPackage();
-            Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
-            using(var form=new Form { Text="Install "+Product+" "+Version,ClientSize=new Size(720,440),MinimumSize=new Size(620,380),StartPosition=FormStartPosition.CenterScreen }) {
-                var layout=new TableLayoutPanel { Dock=DockStyle.Fill,ColumnCount=1,RowCount=2,Padding=new Padding(12) };
-                layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,42));
-                var details=new TextBox { Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Vertical,Dock=DockStyle.Fill,AccessibleName="Installation details",TabIndex=0,
-                    Text="Install "+Product+" "+Version+"\r\n\r\nStandalone: "+SharedApp+"\r\nVST3: "+SharedVst+"\r\n\r\nSave your work, stop MIDI playback and unload the bridge from audio hosts. Install will close the standalone app. Other applications will not be forced to close.\r\n\r\nBoth components are verified before replacement. Settings, NKS presets and the original Roland installation are not changed. A failed replacement restores both previous components. Administrator approval is needed for the shared folders.\r\n\r\nThe Windows package is x64. Native Windows virtual MIDI remains experimental and is not included in this download; configured system MIDI inputs remain available." };
-                var buttons=new FlowLayoutPanel { Dock=DockStyle.Fill,FlowDirection=FlowDirection.LeftToRight,TabIndex=1 };
-                var install=new Button { Text="&Install",AutoSize=true,TabIndex=0 };
-                var open=new Button { Text="&Open Sound Canvas",AutoSize=true,Enabled=false,TabIndex=1 };
-                var close=new Button { Text="&Cancel",AutoSize=true,TabIndex=2,DialogResult=DialogResult.Cancel };
-                buttons.Controls.AddRange(new Control[]{install,open,close});layout.Controls.Add(details);layout.Controls.Add(buttons);form.Controls.Add(layout);
-                form.AcceptButton=install;form.CancelButton=close;form.Shown+=(sender,args)=>{ details.Select(0,0);details.Focus(); };
-                close.Click+=(sender,args)=>form.Close();
-                bool applying=false;
-                form.FormClosing+=(sender,args)=>{ if(applying) args.Cancel=true; };
-                open.Click+=(sender,args)=> {
-                    try {
-                        Process.Start(OpenBridgeInfo());
-                        form.Close();
-                    } catch(Exception error) { Log(error.ToString());details.AppendText("\r\nCould not open Sound Canvas Bridge: "+error.Message);details.Focus(); }
-                };
-                install.Click+=async (sender,args)=> {
-                    applying=true;install.Enabled=false;close.Enabled=false;details.AppendText("\r\n\r\nPreparing installation...");
-                    try {
-                        await Task.Run(()=> {
-                            CloseStandalone();Log("Installation requested for "+Version);
-                            var start=new ProcessStartInfo(Self,"--apply") { UseShellExecute=true,Verb="runas",WindowStyle=ProcessWindowStyle.Hidden };
-                            using(var worker=Process.Start(start)) { worker.WaitForExit();if(worker.ExitCode!=0) throw new IOException("Installation did not complete. Previous files were retained or restored. Details: "+Path.Combine(MachineData,"Installer.log")); }
-                            MigrateShortcuts();
-                        });
-                        details.AppendText("\r\nInstallation completed and both components verified. Your settings and presets were preserved. Rescan your host's VST3 list if needed.");
-                        open.Enabled=true;close.Text="&Close";form.AcceptButton=open;open.Focus();
-                    } catch(Exception error) { Log(error.ToString());details.AppendText("\r\nInstallation stopped: "+error.Message);install.Enabled=true;details.Focus(); }
-                    finally { applying=false;close.Enabled=true; }
-                };
-                Application.Run(form);
+        static Package WizardFixture(Package original,RSACryptoServiceProvider signer,string marker) {
+            var manifest=Json.Deserialize<Manifest>(Json.Serialize(original.info));
+            using(var data=new MemoryStream()) {
+                using(var input=new ZipArchive(new MemoryStream(original.payload),ZipArchiveMode.Read))
+                using(var output=new ZipArchive(data,ZipArchiveMode.Create,true)) {
+                    foreach(var entry in manifest.files) {
+                        byte[] bytes;
+                        using(var content=input.GetEntry(entry.path).Open()) using(var copy=new MemoryStream()) { content.CopyTo(copy);bytes=copy.ToArray(); }
+                        if(entry.path=="Application/Manual.html" || entry.path=="VST3/Contents/Resources/moduleinfo.json") bytes=bytes.Concat(Encoding.UTF8.GetBytes(marker)).ToArray();
+                        entry.size=bytes.Length;entry.sha256=Hash(bytes);
+                        using(var destination=output.CreateEntry(entry.path).Open()) destination.Write(bytes,0,bytes.Length);
+                    }
+                }
+                byte[] bytesManifest=Encoding.UTF8.GetBytes(Json.Serialize(manifest));
+                return new Package(bytesManifest,signer.SignData(bytesManifest,"SHA256"),data.ToArray(),signer.ToXmlString(false));
             }
-            string helper=Path.Combine(SharedApp,"SoundCanvasMaintenance.exe");
-            if(File.Exists(helper) && Self.StartsWith(Updates+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase))
-                Process.Start(new ProcessStartInfo(helper,"--cleanup-after "+Process.GetCurrentProcess().Id) { UseShellExecute=false,CreateNoWindow=true });
+        }
+        static void TestWizardRollback(string root,Package original) {
+            using(var signer=new RSACryptoServiceProvider(2048)) {
+                signer.PersistKeyInCsp=false;
+                var old=WizardFixture(original,signer,"old fixture");
+                var next=WizardFixture(original,signer,"new fixture");
+                string work=Path.Combine(root,"wizard"),journal=Path.Combine(work,"transaction.json");
+                var roots=new[]{Path.Combine(work,"app"),Path.Combine(work,"plugin")};
+                Apply(old,roots,journal);
+                Apply(next,roots,journal,false,-1,false,true);
+                SealSetup(roots,journal,next.key);
+                FinishSetup(roots,journal,next.key,false);
+                for(int i=0;i<2;++i) if(HashFile(Path.Combine(roots[i],ManifestName))!=Hash(old.manifest)) throw new Exception("Wizard cancellation did not restore the previous exact manifest");
+                Apply(next,roots,journal,false,-1,false,true);
+                string unknown=Path.Combine(roots[1],"unexpected.txt");File.WriteAllText(unknown,"retain");
+                try { FinishSetup(roots,journal,next.key,true);throw new Exception("Modified payload was committed"); } catch(IOException) { }
+                if(!File.Exists(journal) || File.ReadAllText(unknown)!="retain") throw new Exception("Failed commit discarded recovery or unknown content");
+                File.Delete(unknown);FinishSetup(roots,journal,next.key,false);
+                for(int i=0;i<2;++i) if(HashFile(Path.Combine(roots[i],ManifestName))!=Hash(old.manifest)) throw new Exception("Failed commit rollback differs");
+                Apply(next,roots,journal,false,-1,false,true);FinishSetup(roots,journal,next.key,true);
+                for(int i=0;i<2;++i) if(HashFile(Path.Combine(roots[i],ManifestName))!=Hash(next.manifest)) throw new Exception("Wizard commit differs");
+                Apply(next,roots,journal,true);Directory.Delete(work);
+            }
         }
         static void SelfTest(string root) {
             if(Admin) throw new InvalidOperationException("Run self-tests without administrator rights.");
@@ -459,7 +490,27 @@ namespace OnjMusic.SoundCanvas {
             if(!TrustedWriter(trustedInstaller) || !TrustedWriter(new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid,null)) || TrustedWriter(new SecurityIdentifier(WellKnownSidType.BuiltinUsersSid,null)) || TrustedWriter(new SecurityIdentifier(WellKnownSidType.AuthenticatedUserSid,null)))
                 throw new Exception("TrustedInstaller and unprivileged-writer distinction failed");
             Directory.CreateDirectory(root);var package=EmbeddedPackage();string journal=Path.Combine(root,"journal.json");var roots=new[]{Path.Combine(root,"app"),Path.Combine(root,"plugin.vst3")};
+            TestWizardRollback(root,package);
             Apply(package,roots,journal);Apply(package,roots,journal);
+            // The wizard owns the final commit. Cancellation and a crash must
+            // restore both components, including on a first installation.
+            Apply(package,roots,journal,false,-1,false,true);
+            if(!File.Exists(journal)) throw new Exception("Wizard rollback journal was removed too early");
+            FinishSetup(roots,journal,package.key,false);
+            for(int i=0;i<2;++i) ValidateTree(roots[i],i,package.key,true);
+            Apply(package,roots,journal,false,-1,false,true);
+            FinishSetup(roots,journal,package.key,true);
+            if(File.Exists(journal)) throw new Exception("Wizard commit retained its journal");
+            int ownerPid=Process.GetCurrentProcess().Id;
+            Apply(package,roots,journal,false,-1,false,true,ownerPid);
+            try { FinishSetup(roots,journal,package.key,false);throw new Exception("Another wizard stole an active transaction"); }
+            catch(IOException error) { if(error.Message!="Another setup wizard is still running.") throw; }
+            FinishSetup(roots,journal,package.key,false,ownerPid);
+            Apply(package,roots,journal,true);
+            Apply(package,roots,journal,false,-1,false,true);
+            Recover(roots,journal,package.key);
+            if(roots.Any(Directory.Exists)) throw new Exception("Cancelled first install left components behind");
+            Apply(package,roots,journal);
             var broken=new Package(package.manifest,package.signature,package.payload.Take(package.payload.Length/2).ToArray(),package.key);
             try { Apply(broken,roots,journal);throw new Exception("Truncated payload accepted"); } catch(InvalidDataException) { }
             for(int i=0;i<2;++i) ValidateTree(roots[i],i,package.key,true);
@@ -511,26 +562,46 @@ namespace OnjMusic.SoundCanvas {
                     var release=Latest(arguments[1]);WriteReply(release==null ? (object)new { status="current",message="No newer published Windows release is available." } : new { status="available",release=release });return 0;
                 }
                 if(arguments.Length==2 && arguments[0]=="--prepare-base64") { WriteReply(Prepare(arguments[1],Version,Download,path=>Process.Start(new ProcessStartInfo(path) {UseShellExecute=true}),Updates));return 0; }
-                if(arguments.Length==1 && arguments[0]=="--apply") {
+                bool setupCommand=arguments.Length==2 && new[]{"--setup-apply","--setup-seal","--setup-commit","--setup-rollback"}.Contains(arguments[0]);
+                if(setupCommand || arguments.Length==1 && new[]{"--apply","--uninstall"}.Contains(arguments[0])) {
+                    int ownerPid=0;
+                    if(setupCommand && (!Int32.TryParse(arguments[1],out ownerPid) || ownerPid<=1)) throw new ArgumentException("Invalid setup process.");
                     if(!Admin) throw new UnauthorizedAccessException("Administrator approval is required.");
                     using(var mutex=new Mutex(false,"Global\\OnjMusicSoundCanvasBridgeInstaller")) {
                         bool acquired=false;try { try { acquired=mutex.WaitOne(0); } catch(AbandonedMutexException) { acquired=true; } if(!acquired) throw new IOException("Another installation is running.");
                             EnsureMachineData();SharedParent(Path.GetDirectoryName(SharedApp));SharedParent(Path.GetDirectoryName(SharedVst));
-                            var package=EmbeddedPackage();Apply(package,new[]{SharedApp,SharedVst},Path.Combine(MachineData,"transaction.json"),false,-1,true);Log("Installed and verified "+Version,true);
+                            var roots=new[]{SharedApp,SharedVst};string journal=Path.Combine(MachineData,"transaction.json");
+                            if(arguments[0]=="--setup-seal") {
+                                SealSetup(roots,journal,PublicKey,ownerPid);
+                            } else if(arguments[0]=="--setup-commit" || arguments[0]=="--setup-rollback") {
+                                FinishSetup(roots,journal,PublicKey,arguments[0]=="--setup-commit",ownerPid);
+                            } else if(arguments[0]=="--uninstall") {
+                                Recover(roots,journal,PublicKey);
+                                var existing=roots.FirstOrDefault(Directory.Exists);
+                                if(existing!=null) {
+                                    var package=new Package(BoundedRead(Path.Combine(existing,ManifestName),1024*1024),BoundedRead(Path.Combine(existing,SignatureName),4096),new byte[0],PublicKey);
+                                    CloseStandalone();Apply(package,roots,journal,true,-1,true);
+                                }
+                            } else {
+                                var package=EmbeddedPackage();CloseStandalone();
+                                Apply(package,roots,journal,false,-1,true,arguments[0]=="--setup-apply",ownerPid);
+                            }
+                            Log(arguments[0]+" completed for "+Version,true);
                         } finally { if(acquired) mutex.ReleaseMutex(); }
                     }
                     return 0;
                 }
                 if(arguments.Length==2 && arguments[0]=="--self-test") { SelfTest(Path.GetFullPath(arguments[1]));return 0; }
+                if(arguments.Length==1 && arguments[0]=="--migrate-shortcuts") { MigrateShortcuts();return 0; }
                 if(arguments.Length==2 && arguments[0]=="--cleanup-after") {
                     int pid;if(!Int32.TryParse(arguments[1],out pid)) return 2;
                     try { using(var process=Process.GetProcessById(pid)) { if(!process.MainModule.FileName.StartsWith(Updates+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase)) return 2;if(!process.WaitForExit(120000)) return 2; } } catch(ArgumentException) { }
                     CleanupUpdates(Updates);return 0;
                 }
-                if(arguments.Length==0) { ShowInstaller();return 0; }
+                if(arguments.Length==0) throw new ArgumentException("Use the Sound Canvas Bridge setup program to install or update. To remove it, use Windows Installed Apps.");
                 throw new ArgumentException("Supported options: --check VERSION, --prepare-base64 RELEASE, --self-test NEW-FOLDER");
             } catch(Exception error) {
-                bool worker=arguments.Contains("--apply");Log(error.ToString(),worker);
+                bool worker=arguments.Any(arg=>arg=="--apply" || arg=="--uninstall" || arg.StartsWith("--setup-",StringComparison.Ordinal));Log(error.ToString(),worker);
                 WriteReply(new { status="error",message=error.Message });
                 if(arguments.Length==0) MessageBox.Show(error.Message,Product,MessageBoxButtons.OK,MessageBoxIcon.Error);
                 return 1;

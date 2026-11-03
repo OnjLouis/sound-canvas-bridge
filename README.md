@@ -5,7 +5,8 @@ Use the original installed synthesis engine in modern VST3 hosts on either platf
 On Apple Silicon, Komplete Kontrol and Logic run natively while a separate helper
 runs the original Intel engine under Rosetta.
 
-Version 1.2 adds Windows x64 support and a standalone All-parts sound-map option.
+Version 1.3 improves installation and discovery, without changing the audio engine
+or the NKS catalogue. Version 1.2 added Windows x64 and All-parts sound-map support.
 Each platform has its own installer and update channel.
 
 **[View published installers](https://github.com/OnjLouis/sound-canvas-bridge/releases)**
@@ -38,7 +39,11 @@ On Windows, the installer places the app in `Program Files/OnjMusic/Sound Canvas
 Bridge` and the plug-in in `Program Files/Common Files/VST3/Sound Canvas Bridge.vst3`.
 It verifies both components, requests administrator approval and restores the
 previous components if replacement fails. Per-user settings, NKS files and the
-original Roland installation are preserved. Existing shortcuts to the earlier
+original Roland installation are preserved. The standard setup wizard offers
+desktop and Start-menu shortcuts and registers Sound Canvas Bridge in Installed
+Apps. Its Finish page can open the app and honours Start hidden. Uninstall removes
+the bridge app, VST3 and setup-created shortcuts, but keeps settings, NKS and Roland
+files. Existing shortcuts to the earlier
 per-user copy are migrated to the shared app. Windows x64 and .NET Framework 4.8
 are required; Windows 11 is tested, other Windows versions remain unverified.
 The original Windows `SCCore.dll` must be 64-bit. No AU is installed on Windows.
@@ -46,7 +51,9 @@ The original Windows `SCCore.dll` must be 64-bit. No AU is installed on Windows.
 On Mac, open the DMG and run **Install Sound Canvas Bridge**. It installs the standalone app
 in Applications and both plug-ins in the shared system audio folders. Stop MIDI
 playback and unload the bridge from audio hosts first. The installer requests
-administrator authorisation, preserves settings and restores the previous bundles
+the standalone app to quit normally, including when hidden in the menu bar. It
+waits for exit before requesting administrator authorisation, preserves settings
+and restores the previous bundles
 if replacement fails. Release downloads are Developer ID signed and notarised.
 
 For NKS, merge the pack's **User Content** and **NI Resources** folders into the
@@ -109,7 +116,9 @@ The standalone receives MIDI, but is not a MIDI-file browser or onscreen keyboar
 Update cleanup never forces a busy disk image to unmount. If macOS keeps a
 cancelled image busy beyond the bounded retries, the temporary download is
 retained and the result is recorded in `UpdateCleanup.log` in the app's log folder.
-Installed files and ongoing playback are unaffected by cancelling the installer.
+Cancelling before choosing Install leaves installed files and playback untouched.
+Once installation starts, the standalone stops; rollback restores files and saved
+settings, not active notes or effect tails.
 
 ## Source and Building
 
