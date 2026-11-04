@@ -9,6 +9,7 @@
 #include "StandaloneEditor.h"
 #include "ControlHelp.h"
 #include "ProgramBrowser.h"
+#include "AccessibleToggleButton.h"
 #include "ProgramSelection.h"
 #ifdef _WIN32
 #include "WindowsIpc.h"
@@ -389,7 +390,7 @@ private:
     std::array<KeyboardSlider, scbridge::parameterCount> sliders;
     std::array<juce::Label, scbridge::parameterCount> labels;
     std::array<scbridge::KeyboardChoice, scbridge::parameterCount> choices;
-    std::array<juce::ToggleButton, scbridge::parameterCount> toggles;
+    std::array<scbridge::AccessibleToggleButton, scbridge::parameterCount> toggles;
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>, scbridge::parameterCount> choiceAttachments;
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>, scbridge::parameterCount> buttonAttachments;
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>, scbridge::parameterCount> attachments;

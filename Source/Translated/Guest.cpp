@@ -140,7 +140,7 @@ int helperMain(int argc, char** argv) {
             } else if (command != 'P' || !active) return 9;
             const bool interval=command=='P' && audioThreadPolicy(1,static_cast<unsigned>(shared->sampleRate),shared->frames)!=0;
             if (shared->reset) {
-                longMidi(gsReset, 0); previous.fill(-1); previousGenerations.fill(UINT32_MAX); mirror.reset();
+                longMidi(gsReset, 0); previous.fill(-1); previousGenerations.fill(UINT32_MAX); mirror.reset(true);
                 for (int warm = 0; warm < 32; ++warm) render(shared->left, shared->right, 512);
                 advancedReady=coreState.attach(argv[1],library);
                 std::fprintf(stderr,"Guest state attached=%d\n",advancedReady);
@@ -168,6 +168,8 @@ int helperMain(int argc, char** argv) {
                     const unsigned block=channel==9 ? 0 : channel<9 ? channel+1 : channel;
                     const auto mode=dt1Message(0x401015+(block<<8),scene.partModes[channel]);
                     queueMessage(mode);mirror.observeLong(mode.bytes.data(),mode.size);
+                    const auto map=dt1Message(0x404001+(block<<8),scene.defaultMaps[channel]);
+                    queueMessage(map);mirror.observeLong(map.bytes.data(),map.size);
                 }
                 render(shared->left,shared->right,32);messageCount=0;
                 const int controllers[]={7,10,11,1,91,93,94};

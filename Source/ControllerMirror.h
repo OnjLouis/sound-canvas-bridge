@@ -8,12 +8,13 @@ namespace scbridge {
 class ControllerMirror {
 public:
     ControllerMirror() { reset(); }
-    void reset() {
+    void reset(bool preserveDefaultMaps=false) {
         for (int part=0;part<16;++part) {
-            values[part]={part,4,0,0,100,64,127,0,40,0,0,64,64,64,64,0};
-            bank[part]=0; map[part]=4;
+            if(!preserveDefaultMaps) selectedMap[part]=4;
+            values[part]={part,static_cast<int32_t>(selectedMap[part]),0,0,100,64,127,0,40,0,0,64,64,64,64,0};
+            bank[part]=0; map[part]=0;
             nrpnMsb[part]=nrpnLsb[part]=127;
-            receive[part]={}; selectedMap[part]=4;
+            receive[part]={};
             partModes[part]=part==9 ? 1 : 0;
         }
     }
@@ -55,11 +56,12 @@ public:
         for(unsigned part=0;part<16;++part) for(unsigned i=1;i<15;++i)
             scene.legacy[part][i-1]=static_cast<uint8_t>(values[part][i]);
         std::copy(partModes.begin(),partModes.end(),scene.partModes);
+        std::copy(selectedMap.begin(),selectedMap.end(),scene.defaultMaps);
     }
     void observeLong(const uint8_t* data,uint32_t size) {
         if (size==6 && data[0]==0xf0 && data[1]==0x7e && (data[2]==0x7f || data[2]==0x10) && data[3]==9 &&
             (data[4]==1 || data[4]==3) && data[5]==0xf7) {
-            reset();
+            reset(true);
             for(auto& rx:receive) { rx.bank=data[4]==3; rx.nrpn=false; }
             return;
         }
@@ -75,7 +77,7 @@ public:
         for (unsigned i=8;i<size-2;++i,++address) {
             const auto a=(address>>14)&127,b=(address>>7)&127,c=address&127;
             if (a!=0x40) continue;
-            if (b==0 && c==0x7f && data[i]==0) { reset(); continue; }
+            if (b==0 && c==0x7f && data[i]==0) { reset(true); continue; }
             const auto block=b&15;
             const auto part=block==0 ? 9 : block<10 ? block-1 : block;
             if ((b&0x70)==0x10) {
@@ -102,8 +104,10 @@ public:
                 const unsigned indices[]={4,5,9,8,10,11,12,13,14};
                 for(unsigned j=0;j<9;++j) if(c==offsets[j]) values[part][indices[j]]=data[i];
             }
-            if ((b&0x70)==0x40 && c==0 && data[i]>=1 && data[i]<=4)
-                values[part][1]=map[part]=data[i];
+            if ((b&0x70)==0x40 && c==0 && data[i]<=4) {
+                map[part]=data[i];
+                values[part][1]=map[part] ? map[part] : selectedMap[part];
+            }
             if ((b&0x70)==0x40 && c==1 && data[i]>=1 && data[i]<=4) {
                 selectedMap[part]=data[i];
                 if(map[part]==0) values[part][1]=selectedMap[part];

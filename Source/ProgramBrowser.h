@@ -9,6 +9,28 @@
 #include <vector>
 
 namespace scbridge {
+class PresetListBox final : public juce::ListBox {
+public:
+    using juce::ListBox::ListBox;
+    void focusSelectedRow() {
+#ifdef _WIN32
+        if(auto* handler=getAccessibilityHandler()) if(auto* table=handler->getTableInterface())
+            if(const auto* row=table->getRowHandler(getSelectedRow()))
+                const_cast<juce::AccessibilityHandler*>(row)->grabFocus();
+#endif
+    }
+    void focusGained(FocusChangeType cause) override {
+        juce::ListBox::focusGained(cause);
+#ifdef _WIN32
+        // JUCE focuses the list container. Expose its selected row after that
+        // handoff, so Windows screen readers receive a named item on entry.
+        juce::Component::SafePointer<PresetListBox> safe(this);
+        juce::MessageManager::callAsync([safe] {
+            if(safe && safe->hasKeyboardFocus(true)) safe->focusSelectedRow();
+        });
+#endif
+    }
+};
 class PresetSelector final : public KeyboardChoice {
 public:
     std::function<void()> onBrowse,onDetails;
@@ -151,7 +173,10 @@ private:
         graphics.setFont(15.0f);
         graphics.drawText(getNameForRow(row), 8, 0, width - 16, height, juce::Justification::centredLeft, true);
     }
-    void selectedRowsChanged(int) override { load.setEnabled(selectedProgram() >= 0); }
+    void selectedRowsChanged(int) override {
+        load.setEnabled(selectedProgram() >= 0);
+        if(list.hasKeyboardFocus(true)) list.focusSelectedRow();
+    }
     void returnKeyPressed(int) override { loadSelected(); }
     void listBoxItemDoubleClicked(int, const juce::MouseEvent&) override { loadSelected(); }
     void loadSelected() {
@@ -178,7 +203,7 @@ private:
 
     juce::TextEditor search;
     juce::ComboBox map, type;
-    juce::ListBox list;
+    PresetListBox list;
     juce::TextButton load, cancel;
     juce::Label searchLabel, mapLabel, typeLabel, count;
     ReviewTextEditor details;

@@ -15,19 +15,30 @@ struct EngineScene {
     uint8_t drums[2][6][128]{};
     InsertionState insertion;
     uint8_t partModes[16]{0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0};
+    uint8_t defaultMaps[16]{4,4,4,4,4,4,4,4,4,4,4,4,4,4,4,4};
 };
 constexpr size_t legacySceneSize=1922;
 constexpr size_t version2SceneSize=1952;
-constexpr unsigned sceneVersion=3;
+constexpr size_t version3SceneSize=1968;
+constexpr unsigned sceneVersion=4;
 static_assert(offsetof(EngineScene,insertion)==legacySceneSize);
 static_assert(offsetof(EngineScene,partModes)==version2SceneSize);
-static_assert(sizeof(EngineScene)==1968);
+static_assert(offsetof(EngineScene,defaultMaps)==version3SceneSize);
+static_assert(sizeof(EngineScene)==1984);
 inline bool hasDefaultPartModes(const EngineScene& scene) {
     for(unsigned part=0;part<16;++part) if(scene.partModes[part]!=(part==9 ? 1 : 0)) return false;
     return true;
 }
-inline unsigned encodedSceneVersion(const EngineScene& scene) { return hasDefaultPartModes(scene) ? 2 : sceneVersion; }
-inline size_t encodedSceneSize(const EngineScene& scene) { return hasDefaultPartModes(scene) ? version2SceneSize : sizeof(EngineScene); }
+inline bool hasDefaultMaps(const EngineScene& scene) {
+    for(auto map:scene.defaultMaps) if(map!=4) return false;
+    return true;
+}
+inline unsigned encodedSceneVersion(const EngineScene& scene) {
+    return !hasDefaultMaps(scene) ? sceneVersion : hasDefaultPartModes(scene) ? 2 : 3;
+}
+inline size_t encodedSceneSize(const EngineScene& scene) {
+    return !hasDefaultMaps(scene) ? sizeof(EngineScene) : hasDefaultPartModes(scene) ? version2SceneSize : version3SceneSize;
+}
 inline bool validScene(const EngineScene& scene) {
     for(int part=0;part<16;++part) {
         for(unsigned i=1;i<15;++i) {
@@ -44,10 +55,12 @@ inline bool validScene(const EngineScene& scene) {
     for(const auto& setup:scene.drums) for(const auto& field:setup)
         for(auto value:field) if(value>127) return false;
     for(auto mode:scene.partModes) if(mode>2) return false;
+    for(auto map:scene.defaultMaps) if(map<1 || map>4) return false;
     return validInsertionState(scene.insertion);
 }
 inline bool decodeScene(unsigned version,const void* bytes,size_t size,EngineScene& destination) {
     if(!bytes || !((version==1 && size==legacySceneSize) || (version==2 && size==version2SceneSize) ||
+                  (version==3 && size==version3SceneSize) ||
                   (version==sceneVersion && size==sizeof(EngineScene)))) return false;
     EngineScene scene;
     std::memcpy(&scene,bytes,size);

@@ -1,5 +1,6 @@
 #define SCBRIDGE_STANDALONE_TEST 1
 #include "../Source/Standalone.cpp"
+#include "../Source/ProgramBrowser.h"
 #include <iostream>
 #include <set>
 #include "AudioStartupFixture.h"
@@ -13,6 +14,28 @@ int main(int argc,char** argv) {
     auto check=[&](bool success,const char* message) {
         if(!success) { std::cerr<<"FAIL: "<<message<<'\n';++failures; }
     };
+    {
+        scbridge::AccessibleToggleButton checkbox("Test checkbox");
+        juce::Component host;
+        host.setSize(240,40);host.addAndMakeVisible(checkbox);checkbox.setBounds(host.getLocalBounds());
+        host.addToDesktop(0);host.setVisible(true);
+        checkbox.setToggleState(true,juce::dontSendNotification);
+        auto* handler=checkbox.getAccessibilityHandler();
+        check(handler && handler->getCurrentState().isCheckable() && handler->getCurrentState().isChecked(),
+              "Checkboxes must expose their checked state");
+        check(handler && !handler->getValueInterface(),"Windows checkboxes must not expose a read-only text value");
+        int clicks=0;checkbox.onClick=[&] {++clicks;};
+        if(handler) {
+            check(handler->getActions().invoke(juce::AccessibilityActionType::toggle),"Checkbox must expose a native toggle action");
+            check(!checkbox.getToggleState() && !handler->getCurrentState().isChecked() && clicks==1,"Checkbox toggle must update its state and callback");
+            checkbox.setEnabled(false);handler->getActions().invoke(juce::AccessibilityActionType::toggle);
+            check(!checkbox.getToggleState() && clicks==1,"Disabled checkboxes must not toggle");
+            checkbox.setEnabled(true);checkbox.grabKeyboardFocus();
+            host.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::returnKey));
+            juce::MessageManager::getInstance()->runDispatchLoopUntil(200);
+            check(checkbox.getToggleState() && clicks==2,"Enter must retain normal checkbox activation");
+        }
+    }
     audioStartupFixture::run(check);
     preferencesStartupFixture::run(check);
     std::unique_ptr<juce::AudioProcessor> processor(createPluginFilter());
@@ -38,6 +61,43 @@ int main(int argc,char** argv) {
     check(focused && focused->getName()=="Control page","Initial focus must land on Control page, not a layout wrapper");
     if(focused) std::cout<<"Initial focused component: "<<focused->getName()<<'\n';
     auto* editor=processor->getActiveEditor();
+    auto* preset=dynamic_cast<juce::ComboBox*>(editor->findChildWithID("currentSound"));
+    check(preset!=nullptr,"Standalone must expose its current preset selector");
+    if(preset) {
+        preset->grabKeyboardFocus();
+        main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::returnKey));
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+        scbridge::ProgramBrowser* browser=nullptr;
+        for(auto* child:editor->getChildren()) if(auto* candidate=dynamic_cast<scbridge::ProgramBrowser*>(child)) browser=candidate;
+        auto* list=browser ? dynamic_cast<juce::ListBox*>(browser->findChildWithID("presetList")) : nullptr;
+        check(browser && browser->isShowing() && browser->matchingCount()>0,"Enter must open a populated standalone browser");
+        auto* table=list ? list->getAccessibilityHandler()->getTableInterface() : nullptr;
+        auto* row=table ? table->getRowHandler(0) : nullptr;
+        check(table && table->getNumRows()>0 && row && row->getTitle().isNotEmpty(),"Standalone browser must expose named rows to accessibility");
+        if(browser) {
+            std::cout<<"Standalone browser model="<<browser->matchingCount()<<" accessible="<<(table ? table->getNumRows() : -1)<<" bounds="<<browser->getBounds().toString()<<'\n';
+            for(int step=0;step<3;++step) main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::tabKey));
+            juce::MessageManager::getInstance()->runDispatchLoopUntil(30);
+            check(list && list->hasKeyboardFocus(true),"Three Tabs from Search must reach the preset list");
+            if(list) {
+                auto* accessibleFocus=list->getAccessibilityHandler()->getChildFocus();
+                const auto* selectedRow=table ? table->getRowHandler(list->getSelectedRow()) : nullptr;
+                check(accessibleFocus && accessibleFocus==selectedRow,"Tab into Presets must expose the selected row as accessibility focus");
+                const auto selected=list->getSelectedRow();
+                main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::downKey));
+                check(list->getSelectedRow()==selected+1,"Preset list Down must select the next sound");
+                accessibleFocus=list->getAccessibilityHandler()->getChildFocus();
+                selectedRow=table ? table->getRowHandler(list->getSelectedRow()) : nullptr;
+                check(accessibleFocus && accessibleFocus==selectedRow,"Preset arrows must expose the new selected row as accessibility focus");
+            }
+            if(argc==3 && std::string(argv[2])=="--inspect-browser") {
+                std::cout<<"Browser inspection ready\n"<<std::flush;
+                juce::MessageManager::getInstance()->runDispatchLoopUntil(90000);
+            }
+            browser->keyPressed(juce::KeyPress(juce::KeyPress::escapeKey));
+            focusFirstControl(*main.getContentComponent());
+        }
+    }
     for(auto* child:editor->getChildren()) if(child->getComponentID()=="part" || child->getComponentID()=="program") {
         auto* value=child->getAccessibilityHandler()->getValueInterface();
         check(value && value->getCurrentValue()==1,"Accessible Part and Program must use the displayed one-based value");
@@ -191,7 +251,7 @@ int main(int argc,char** argv) {
         check(editor->findChildWithID("program")->isEnabled(),"A numbered part must restore ordinary edits");
         check(processor->getParameters().size()==93,"Standalone All must not change the VST/NKS parameter contract");
     }
-    if(argc!=2 || !juce::File::isAbsolutePath(argv[1])) {check(false,"An isolated test-files folder is required");}
+    if((argc!=2 && argc!=3) || !juce::File::isAbsolutePath(argv[1])) {check(false,"An isolated test-files folder is required");}
     else {
         const auto root=juce::File(argv[1]).getNonexistentChildFile("shortcut-fixture",{});
         const auto source=root.getChildFile("portable"),local=root.getChildFile("installed"),desktop=root.getChildFile("desktop"),login=root.getChildFile("startup");

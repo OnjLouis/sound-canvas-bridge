@@ -2,6 +2,13 @@
 <html lang="en-GB"><head><meta charset="utf-8"><title>Sound Canvas Bridge Version History</title>
 <style>body{max-width:50rem;margin:2rem auto;padding:0 1rem;font:1rem/1.6 system-ui;color:#181818;background:#fff}</style></head>
 <body><main><h1>Sound Canvas Bridge Version History</h1>
+<h2>1.4.2 - 4 November 2026</h2>
+<ul><li>Windows preset-browser keyboard entry and selection changes now focus the named row for screen readers instead of leaving accessibility focus on the list container.</li>
+<li>Windows checkboxes expose a normal checked state and toggle action without the misleading read-only text value. Existing Enter activation is unchanged.</li>
+<li>All-parts map selection now sets the native default map, which survives GS Reset and MIDI rewind. Explicit MIDI map changes still take precedence.</li>
+<li>Saved scenes retain each part's default map. Existing version 1, 2 and 3 scenes remain readable; scenes with custom map defaults use version 4 and need this build or later.</li>
+<li>A successful updater-to-installer handoff no longer leaves an unnecessary modal OK dialog. Errors and manual update-check results remain visible.</li>
+<li>Existing NKS files, previews, favourite identities and all 93 automation controls are unchanged.</li></ul>
 <h2>1.4.1 - Windows</h2>
 <ul><li>Fix an in-app update failure where the waiting setup launcher kept the installation folder open, preventing replacement. Setup and update workers now use explicit staging working directories.</li>
 <li>Browse presets and Current sound keep their instructions in F1 help rather than automatically reading them on Windows. Control names, sound names and keyboard navigation are unchanged.</li>

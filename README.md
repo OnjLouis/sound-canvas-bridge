@@ -23,7 +23,11 @@ NKS files or previews. Version 1.3 improves installation and discovery, without 
 or the NKS catalogue. Version 1.2 added Windows x64 and All-parts sound-map support.
 Each platform has its own installer and update channel.
 
-**[View published installers](https://github.com/OnjLouis/sound-canvas-bridge/releases)**
+**[Windows installer and release notes](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/windows-v1.4.2)**
+
+**[Mac installer and release notes](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/v1.4.2)**
+
+[All releases](https://github.com/OnjLouis/sound-canvas-bridge/releases)
 
 **[Get the Sound Canvas NKS presets from OnjMusic](https://onj.me/nks)**
 
@@ -81,7 +85,8 @@ and User library. Browse **User / Roland Cloud / Sound Canvas**.
 
 - Sixteen-part MIDI playback and SysEx, with the original engine's compatibility maps.
 - Standalone All (Sound Map) selection applies a map to all sixteen parts without
-  changing their bank, program, mixer or effects. The plug-in/NKS parameter layout
+  changing their bank, program, mixer or effects. It sets the default map retained
+  across GS Reset, while explicit MIDI maps still take precedence. The plug-in/NKS parameter layout
   is unchanged; no replacement previews or preset identities are needed for 1.2.
 - Ninety-three controls, including tone shaping, vibrato, master settings, reverb,
   chorus, delay, EQ, insertion effects and individual drum-note settings.
@@ -157,6 +162,8 @@ Saved scenes preserve insertion settings and all 16 melodic/drum assignments.
 Older scenes load with their historical reset-default assignments. Default-role
 scenes retain the older encoding; custom assignments use scene version 3 and
 require the updated bridge to recall them correctly.
+Scenes with custom default maps use version 4 and require bridge 1.4.2 or later;
+all older scene versions remain readable. Existing NKS presets need no changes.
 The standalone receives MIDI, but is not a MIDI-file browser or onscreen keyboard.
 
 Update cleanup never forces a busy disk image to unmount. If macOS keeps a

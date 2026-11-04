@@ -108,6 +108,10 @@ The supplied Win32 guest is built from `Source/Translated/Guest.cpp`. To rebuild
 it, set `SCBRIDGE_GUEST_COMPILER` to an i686 MinGW C++ compiler. The default uses
 the matching bridge-built executable in MacRuntime; its complete source is in
 the same release. The guest protocol is shared with `Source/Protocol.h`.
+Prebuilt guests must include `guest/Build.json` with their protocol number and
+SHA-256. Configuration rejects a mismatched protocol or changed executable.
+After a protocol change, rebuild the guest and refresh this metadata together;
+an older release's runtime inputs are not a compatible substitute.
 The release source archive also includes `Dependencies/RuntimeSources`: Wine,
 TinyCore userspace component source archives and their manifest/build references.
 The open-source runtime filesystem remains replaceable. Microsoft DLLs are

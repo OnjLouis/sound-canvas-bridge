@@ -8,7 +8,8 @@ inline std::array<ControlMessage,16> allPartMapMessages(int map) {
     if(map<1 || map>4) return result;
     for(unsigned part=0;part<result.size();++part) {
         const unsigned block=part==9 ? 0 : part<9 ? part+1 : part;
-        result[part]=dt1Message(0x404000+(block<<8),static_cast<uint8_t>(map));
+        // Map 0 follows the persistent TONE MAP-0 NUMBER across GS Reset.
+        result[part]=dt1Message(0x404000+(block<<8),0,static_cast<uint8_t>(map));
     }
     return result;
 }

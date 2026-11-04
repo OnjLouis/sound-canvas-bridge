@@ -4,6 +4,7 @@
 #include "UpdateService.h"
 #include "TransientTooltip.h"
 #include "EnginePreferences.h"
+#include "AccessibleToggleButton.h"
 #ifdef _WIN32
 #include "WindowsInstallation.h"
 #endif
@@ -132,7 +133,7 @@ private:
     static void showError(const juce::String& text) { juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Preferences",text); }
     AppPreferences& preferences;StartupService& startup;UpdateService& updates;
     EnginePreferences engine;
-    juce::Label frequencyLabel,status;juce::ComboBox frequency;juce::TextButton check;juce::ToggleButton runLogin,hidden;
+    juce::Label frequencyLabel,status;juce::ComboBox frequency;juce::TextButton check;AccessibleToggleButton runLogin,hidden;
     TransientTooltip tips{this,700};
 #ifdef _WIN32
     juce::TextButton desktop;

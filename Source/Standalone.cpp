@@ -13,6 +13,7 @@
 #include "StandaloneControls.h"
 #include "StandaloneAudio.h"
 #include "ControlHelp.h"
+#include "AccessibleToggleButton.h"
 #include "DawPresets.h"
 #ifdef _WIN32
 #include "WindowsMenuBar.h"
@@ -136,7 +137,7 @@ public:
         if(available!=ports) {
             ports=available;buttons.clear();
             for(const auto& port:ports) {
-                auto button=std::make_unique<juce::ToggleButton>(port.name);
+                auto button=std::make_unique<scbridge::AccessibleToggleButton>(port.name);
                 button->setName(port.name);button->setComponentID(port.identifier);
                 button->setTooltip("Receives all MIDI channels and SysEx from this input alongside the virtual port. Release held keys before disabling an input.");
                 button->setHelpText(button->getTooltip());button->setDescription(button->getName());
@@ -178,7 +179,7 @@ private:
     juce::Array<juce::MidiDeviceInfo> ports;
     Rows content;
     Scroller viewport;
-    std::vector<std::unique_ptr<juce::ToggleButton>> buttons;
+    std::vector<std::unique_ptr<scbridge::AccessibleToggleButton>> buttons;
 };
 
 class AudioPreferences final : public juce::Component,private juce::ChangeListener,private juce::Timer {

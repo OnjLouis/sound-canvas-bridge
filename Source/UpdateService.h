@@ -1,5 +1,6 @@
 #pragma once
 #include "AppPreferences.h"
+#include "UpdatePresentation.h"
 #include <atomic>
 
 namespace scbridge {
@@ -94,7 +95,9 @@ private:
             }
             lastStatus=message.isNotEmpty() ? message : failed ? output : "The update server returned an invalid response.";
             if(state=="error" || state.isEmpty()) juce::Logger::writeToLog("Update operation: "+lastStatus.substring(0,4096));
-            if(wasManual || wasPreparing) juce::AlertWindow::showMessageBoxAsync(
+            // The installer is already open; a modal acknowledgement here can
+            // prevent its graceful shutdown request from reaching this app.
+            if(shouldShowUpdateResult(wasManual,wasPreparing,failed,state.toStdString())) juce::AlertWindow::showMessageBoxAsync(
                 state=="error" || state.isEmpty() ? juce::MessageBoxIconType::WarningIcon : juce::MessageBoxIconType::InfoIcon,
                 "Check for Updates",lastStatus);
         });

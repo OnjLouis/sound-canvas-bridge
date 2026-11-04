@@ -25,6 +25,21 @@ int main() {
             require(actual[1]==map && actual[2]==int(part+2) && actual[3]==int(part+7),
                 "All-parts map must cover each GS part block without changing bank/program");
         }
+        const uint8_t reset[]{0xf0,0x41,0x10,0x42,0x12,0x40,0,0x7f,0,0x41,0xf7};
+        all.observeLong(reset,sizeof(reset));
+        for(unsigned part=0;part<16;++part) {
+            int32_t pending[scbridge::parameterCount]{},actual[scbridge::parameterCount]{};
+            all.snapshot(part,pending,actual);
+            require(actual[1]==map,"GS reset must preserve the selected default map on every part");
+            all.observeShort((0xb0|part)|(32<<8)|(4<<16));
+            all.observeShort((0xc0|part)|(5<<8));
+            all.snapshot(part,pending,actual);
+            require(actual[1]==4,"Explicit MIDI maps must override the default map");
+            all.observeShort((0xb0|part)|(32<<8));
+            all.observeShort((0xc0|part)|(5<<8));
+            all.snapshot(part,pending,actual);
+            require(actual[1]==map,"Bank LSB zero must return to the selected default map");
+        }
     }
     for(const auto& message:scbridge::allPartMapMessages(0)) require(message.size==0,"Invalid map must not generate MIDI");
     for(const auto& message:scbridge::allPartMapSelection(5,{})) require(message.size==0,"Invalid map must not reselect tones");

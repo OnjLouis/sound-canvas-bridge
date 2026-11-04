@@ -18,13 +18,20 @@ int main() {
     if(!scbridge::decodeScene(3,version3.data(),version3.size(),restored)) {
         std::cerr<<"FAIL: version 3 must retain custom rhythm-part assignments\n";return 3;
     }
-    if(sizeof(restored)!=version3.size() || std::memcmp(&restored,version3.data(),version3.size())) return 4;
+    if(std::memcmp(&restored,version3.data(),version3.size()) || !scbridge::hasDefaultMaps(restored)) return 4;
     if(scbridge::encodedSceneVersion(restored)!=3 || scbridge::encodedSceneSize(restored)!=1968) return 10;
     if(!scbridge::decodeScene(2,&original,scbridge::version2SceneSize,restored) ||
        restored.partModes[9]!=1 || restored.partModes[2]!=0) return 5;
     if(!scbridge::decodeScene(1,&original,scbridge::legacySceneSize,restored) || restored.partModes[9]!=1) return 6;
     version3[1952]=3;
     if(scbridge::decodeScene(3,version3.data(),version3.size(),restored)) return 7;
+    auto custom=original;
+    custom.defaultMaps[0]=1;custom.defaultMaps[9]=3;
+    if(scbridge::encodedSceneVersion(custom)!=4 || scbridge::encodedSceneSize(custom)!=sizeof(custom) ||
+       !scbridge::decodeScene(4,&custom,sizeof(custom),restored) ||
+       std::memcmp(&custom,&restored,sizeof(custom))) return 11;
+    custom.defaultMaps[5]=0;
+    if(scbridge::decodeScene(4,&custom,sizeof(custom),restored)) return 12;
     scbridge::StateMailbox<scbridge::StateFrame> mailbox;
     std::atomic<bool> done{false},bad{false};std::atomic<unsigned> reads{0};
     auto reader=[&] {
