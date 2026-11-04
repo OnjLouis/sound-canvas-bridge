@@ -149,8 +149,8 @@ tested. Testing included native Apple Silicon and Intel/Rosetta slices, real Log
 and Komplete Kontrol playback, physical MIDI, state recall and installer rollback.
 The current NKS pack was checked for cross-platform identities and paths, and
 program/drum states from all four maps loaded and rendered through the installed
-Windows VST3. Windows Komplete Kontrol browsing and hardware operation still need
-community testing; that host was not used for the Windows acceptance test.
+Windows VST3. Community testers have also confirmed working Komplete Kontrol
+browsing on Windows.
 
 Mapped state is saved across all parts and both drum setups. This is not a complete
 SysEx dump: retain external initialisation in your project for unmapped settings.
