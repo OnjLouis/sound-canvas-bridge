@@ -65,6 +65,14 @@ int main(int argc,char** argv) {
     check(preset!=nullptr,"Standalone must expose its current preset selector");
     if(preset) {
         preset->grabKeyboardFocus();
+        main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::homeKey));
+        main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::pageDownKey));
+        check(preset->getSelectedItemIndex()==10 && processor->getCurrentProgram()==preset->getItemId(10)-1,"Standalone must route Page Down from the focused current-sound selector");
+        main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::endKey));
+        check(preset->getSelectedItemIndex()==preset->getNumItems()-1,"Standalone must route End to the last sound");
+        main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::homeKey));
+        main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::pageUpKey));
+        check(preset->getSelectedItemIndex()==0,"Standalone Home and Page Up must stop at the first sound");
         main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::returnKey));
         juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
         scbridge::ProgramBrowser* browser=nullptr;
@@ -97,6 +105,20 @@ int main(int argc,char** argv) {
             browser->keyPressed(juce::KeyPress(juce::KeyPress::escapeKey));
             focusFirstControl(*main.getContentComponent());
         }
+    }
+    auto* controlPage=dynamic_cast<juce::ComboBox*>(editor->findChildWithID("controlPage"));
+    check(controlPage!=nullptr,"Standalone must expose the control-page selector");
+    if(controlPage) {
+        const auto sound=processor->getCurrentProgram();
+        controlPage->grabKeyboardFocus();
+        main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::endKey));
+        check(controlPage->getSelectedItemIndex()==controlPage->getNumItems()-1,"Standalone must route End to the last control page");
+        main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::pageUpKey));
+        check(controlPage->getSelectedItemIndex()==0,"Standalone control-page Page Up must move ten entries");
+        main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::pageDownKey));
+        check(controlPage->getSelectedItemIndex()==10,"Standalone control-page Page Down must move ten entries");
+        main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::homeKey));
+        check(controlPage->getSelectedItemIndex()==0 && processor->getCurrentProgram()==sound,"Standalone page navigation must preserve the sound");
     }
     for(auto* child:editor->getChildren()) if(child->getComponentID()=="part" || child->getComponentID()=="program") {
         auto* value=child->getAccessibilityHandler()->getValueInterface();
@@ -247,6 +269,11 @@ int main(int argc,char** argv) {
         check(broadcasts==std::vector<int>({2,2,3,4,3,1,4}),"All-map Home and End must select the map limits");
         main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::downKey));
         check(broadcasts.size()==7,"Arrow keys at a map limit must not repeatedly reselect all tones");
+        main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::pageUpKey));
+        main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::pageDownKey));
+        check(broadcasts==std::vector<int>({2,2,3,4,3,1,4,1,4}),"All-map page keys must move from the last requested map and clamp to its limits");
+        main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::pageDownKey));
+        check(broadcasts.size()==9,"A page key at the map limit must not send a duplicate broadcast");
         partScope->setSelectedId(2,juce::sendNotificationSync);
         check(editor->findChildWithID("program")->isEnabled(),"A numbered part must restore ordinary edits");
         check(processor->getParameters().size()==93,"Standalone All must not change the VST/NKS parameter contract");

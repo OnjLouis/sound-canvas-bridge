@@ -23,9 +23,9 @@ NKS files or previews. Version 1.3 improves installation and discovery, without 
 or the NKS catalogue. Version 1.2 added Windows x64 and All-parts sound-map support.
 Each platform has its own installer and update channel.
 
-**[Windows installer and release notes](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/windows-v1.4.2)**
+**[Windows installer and release notes](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/windows-v1.4.3)**
 
-**[Mac installer and release notes](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/v1.4.2)**
+**[Mac installer and release notes](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/v1.4.3)**
 
 [All releases](https://github.com/OnjLouis/sound-canvas-bridge/releases)
 
@@ -130,6 +130,8 @@ resolved, not rewired; edited and unrelated banks remain untouched.
 The current-name selector above the controls loads adjacent sounds with Up/Down
 and announces their names. Enter opens the searchable browser. Browser rows use
 short names; F1 opens the full address details, and Escape returns to the same row.
+Choice controls, including Current sound and Control page, support Home/End for
+the first/last entry and Page Up/Page Down for ten-entry jumps without wrapping.
 The VST3 retains one native program because JUCE's root factory list can otherwise
 reinterpret per-channel MIDI program changes as global factory selections.
 

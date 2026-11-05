@@ -4,6 +4,7 @@
 #include <set>
 #include "../Source/ProgramBrowser.h"
 #include "../Source/Controls.h"
+#include "KeyboardChoiceFixture.h"
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -22,6 +23,11 @@ struct ProgramNotification final : juce::AudioProcessorListener {
 
 int main(int argc,char** argv) {
     juce::ScopedJuceInitialiser_GUI gui;
+    bool choicesPassed=true;
+    keyboardChoiceFixture::run([&](bool value,const char* message) {
+        if(!value) {std::cerr<<"FAIL: "<<message<<'\n';choicesPassed=false;}
+    });
+    if(!choicesPassed) return 1;
     std::unique_ptr<juce::AudioProcessor> processor(createPluginFilter());
     ProgramNotification notification(*processor);
     std::unique_ptr<juce::AudioProcessorEditor> editor(processor->createEditorIfNeeded());
@@ -190,6 +196,35 @@ int main(int argc,char** argv) {
         if(processor->getCurrentProgram()!=i+2) {
             std::cerr<<"FAIL: rapid preset arrows must not wait for the display timer\n";return 1;
         }
+    }
+    name->keyPressed(juce::KeyPress(juce::KeyPress::homeKey));
+    if(name->getSelectedItemIndex()!=0 || processor->getCurrentProgram()!=name->getItemId(0)-1) {
+        std::cerr<<"FAIL: current sound Home must load the first filtered sound\n";return 1;
+    }
+    name->keyPressed(juce::KeyPress(juce::KeyPress::pageDownKey));
+    if(name->getSelectedItemIndex()!=10 || processor->getCurrentProgram()!=name->getItemId(10)-1) {
+        std::cerr<<"FAIL: current sound Page Down must load the tenth following entry\n";return 1;
+    }
+    name->keyPressed(juce::KeyPress(juce::KeyPress::pageUpKey));
+    if(name->getSelectedItemIndex()!=0) {std::cerr<<"FAIL: current sound Page Up\n";return 1;}
+    name->keyPressed(juce::KeyPress(juce::KeyPress::endKey));
+    if(name->getSelectedItemIndex()!=name->getNumItems()-1 ||
+       processor->getCurrentProgram()!=name->getItemId(name->getNumItems()-1)-1 ||
+       name->getProperties()["lastKeyboardAnnouncement"].toString()!="Current sound, "+name->getText()) {
+        std::cerr<<"FAIL: current sound End must load and announce the last filtered sound\n";return 1;
+    }
+    auto* page=dynamic_cast<juce::ComboBox*>(editor->findChildWithID("controlPage"));
+    if(!page) {std::cerr<<"FAIL: control-page choice missing\n";return 1;}
+    const auto soundBeforePageChange=processor->getCurrentProgram();
+    page->keyPressed(juce::KeyPress(juce::KeyPress::endKey));
+    if(page->getSelectedItemIndex()!=page->getNumItems()-1) {std::cerr<<"FAIL: control-page End\n";return 1;}
+    page->keyPressed(juce::KeyPress(juce::KeyPress::pageUpKey));
+    if(page->getSelectedItemIndex()!=0) {std::cerr<<"FAIL: control-page Page Up\n";return 1;}
+    page->keyPressed(juce::KeyPress(juce::KeyPress::pageDownKey));
+    if(page->getSelectedItemIndex()!=10) {std::cerr<<"FAIL: control-page Page Down\n";return 1;}
+    page->keyPressed(juce::KeyPress(juce::KeyPress::homeKey));
+    if(page->getSelectedItemIndex()!=0 || processor->getCurrentProgram()!=soundBeforePageChange) {
+        std::cerr<<"FAIL: control-page Home must not change the loaded sound\n";return 1;
     }
     name->keyPressed(juce::KeyPress(juce::KeyPress::returnKey));
     if(!browser->isVisible()) { std::cerr<<"FAIL: Enter on the main preset name must open the searchable browser\n";return 1; }

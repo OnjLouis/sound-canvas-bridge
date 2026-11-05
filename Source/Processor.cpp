@@ -138,7 +138,7 @@ public:
             }
         }
         page.setComponentID("controlPage");page.setName("Control page");page.setTitle("Control page");
-        page.setTooltip("Selects Main, Tone, Master, Reverb, Chorus, Delay, EQ, Drums or Insertion controls. Insertion Parameters pages expose all 20 slots directly. This changes only the displayed controls, not the sound.");
+        page.setTooltip("Selects Main, Tone, Master, Reverb, Chorus, Delay, EQ, Drums or Insertion controls. Insertion Parameters pages expose all 20 slots directly. Up and Down select adjacent pages; Home and End select the first and last; Page Up and Page Down move ten entries. This changes only the displayed controls, not the sound.");
         page.setDescription(page.getName());page.setHelpText(page.getTooltip());
         page.addItemList({"Main","Tone","Master","Reverb","Chorus","Delay","EQ","Drums","Insertion","Insertion Parameters 1-10","Insertion Parameters 11-20"},1);
         page.setSelectedId(1,juce::dontSendNotification);
@@ -162,7 +162,7 @@ public:
         currentSound.setComponentID("currentSound");currentSound.setName("Current sound");currentSound.setTitle("Current sound");
         currentSound.setWantsKeyboardFocus(true);currentSound.setExplicitFocusOrder(3);
         currentSound.getProperties().set(scbridge::explicitHelpProperty,
-            "Up and Down load the previous or next named sound in the current map and sound type. Enter opens the searchable browser. F1 shows the selected sound's address.");
+            "Up and Down load the previous or next named sound in the current map and sound type. Home and End load the first and last; Page Up and Page Down move ten entries, stopping at the limits. Enter opens the searchable browser. F1 shows the selected sound's address.");
 #ifndef _WIN32
         currentSound.setHelpText(scbridge::contextHelp(currentSound));
         currentSound.setTooltip(scbridge::contextHelp(currentSound));
@@ -278,6 +278,8 @@ private:
         else if(code==juce::KeyPress::upKey || code==juce::KeyPress::leftKey) next=next ? std::max(1,next-1) : count;
         else if(code==juce::KeyPress::homeKey) next=1;
         else if(code==juce::KeyPress::endKey) next=count;
+        else if(code==juce::KeyPress::pageUpKey) next=next ? std::max(1,next-scbridge::keyboardChoicePageStep) : count;
+        else if(code==juce::KeyPress::pageDownKey) next=next ? std::min(count,next+scbridge::keyboardChoicePageStep) : 1;
         else return false;
         // The request-only display deliberately has no selected menu item, so
         // remember its position separately instead of nudging ComboBox's zero ID.

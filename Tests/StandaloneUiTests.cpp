@@ -129,6 +129,9 @@ int main(int argc,char** argv) {
         for(int key:{juce::KeyPress::upKey,juce::KeyPress::upKey,juce::KeyPress::downKey})
             host.getPeer()->handleKeyPress(juce::KeyPress(key));
         require(requests==std::vector<int>({3,3,2,1,2}),"All-map arrows must retain their last requested position");
+        for(int key:{juce::KeyPress::homeKey,juce::KeyPress::endKey,juce::KeyPress::pageUpKey,juce::KeyPress::pageDownKey})
+            host.getPeer()->handleKeyPress(juce::KeyPress(key));
+        require(requests==std::vector<int>({3,3,2,1,2,1,4,1,4}),"All-map Home/End and page keys must retain their request position and clamp");
         part->setSelectedId(2,juce::sendNotificationSync);
         require(editor->findChildWithID("program")->isEnabled(),"Returning to a numbered part must restore edits");
         require(processor->getParameters().size()==93,"NKS/automation contract must remain unchanged");
