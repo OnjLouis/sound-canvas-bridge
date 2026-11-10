@@ -5,7 +5,7 @@ class StartupService {
 public:
     explicit StartupService(juce::File directory=juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
         .getChildFile("Microsoft/Windows/Start Menu/Programs/Startup"),juce::String arguments={})
-        :file(directory.getChildFile("Sound Canvas Bridge.lnk")),launchArguments(std::move(arguments)) {}
+        :file(directory.getChildFile(shortcutName())),launchArguments(std::move(arguments)) {}
     static bool addDesktopShortcut(const juce::File& app,juce::String& error,
         juce::File desktop=juce::File::getSpecialLocation(juce::File::userDesktopDirectory)) {
         return StartupService(std::move(desktop),"--show-controls").setEnabled(true,app,error);
@@ -25,10 +25,11 @@ public:
         if(FAILED(link->QueryInterface(IID_IPersistFile,reinterpret_cast<void**>(&persistence)))) return false;
         struct ReleaseFile { IPersistFile* p;~ReleaseFile(){p->Release();} } releaseFile{persistence};
         if(file.existsAsFile()) {
-            wchar_t target[32768]{},arguments[32768]{};
+            wchar_t target[MAX_PATH]{},arguments[MAX_PATH]{};
             if(FAILED(persistence->Load(file.getFullPathName().toWideCharPointer(),STGM_READ)) ||
-               FAILED(link->GetPath(target,32768,nullptr,SLGP_RAWPATH)) || juce::File(juce::String(target))!=app ||
-               FAILED(link->GetArguments(arguments,32768)) || juce::String(arguments)!=launchArguments) {
+               link->GetPath(target,MAX_PATH,nullptr,SLGP_RAWPATH)!=S_OK ||
+               !matchesTarget(target,app) ||
+               FAILED(link->GetArguments(arguments,MAX_PATH)) || juce::String(arguments)!=launchArguments) {
                 error="The existing shortcut has a different target or arguments. Nothing was changed.";return false;
             }
         }
@@ -51,6 +52,23 @@ public:
         return true;
     }
 private:
+    static bool matchesTarget(const juce::String& target,const juce::File& app) {
+        if(!juce::File::isAbsolutePath(target)) return false;
+        if(juce::File(target)==app) return true;
+        // Older shell versions can save the long form of a path passed in as an 8.3 alias.
+        wchar_t saved[MAX_PATH]{},expected[MAX_PATH]{};
+        const auto savedLength=GetLongPathNameW(target.toWideCharPointer(),saved,MAX_PATH);
+        const auto expectedLength=GetLongPathNameW(app.getFullPathName().toWideCharPointer(),expected,MAX_PATH);
+        return savedLength>0 && savedLength<MAX_PATH && expectedLength>0 && expectedLength<MAX_PATH &&
+            juce::File(juce::String(saved))==juce::File(juce::String(expected));
+    }
+    static constexpr const char* shortcutName() {
+#ifdef SCBRIDGE_WINDOWS7
+        return "Sound Canvas Bridge Windows 7.lnk";
+#else
+        return "Sound Canvas Bridge.lnk";
+#endif
+    }
     juce::File file;
     juce::String launchArguments;
 };

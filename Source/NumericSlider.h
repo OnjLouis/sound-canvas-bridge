@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_audio_utils/juce_audio_utils.h>
 #include <charconv>
+#include "LegacyWindowsAccessibility.h"
 
 namespace scbridge {
 class NumericSlider final : public juce::Slider {
@@ -111,8 +112,11 @@ private:
 #ifdef SOUNDCANVAS_TEST_PROFILE
         getProperties().set("lastKeyboardAnnouncement",text);
 #endif
-        if (auto* handler = getAccessibilityHandler())
-            handler->notifyAccessibilityEvent(juce::AccessibilityEvent::valueChanged);
+#ifdef SCBRIDGE_WINDOWS7
+        if (!legacyAnnouncement.post(*this,getTextFromValue(getValue())))
+#endif
+            if (auto* handler = getAccessibilityHandler())
+                handler->notifyAccessibilityEvent(juce::AccessibilityEvent::valueChanged);
 #ifndef _WIN32
         juce::AccessibilityHandler::postAnnouncement(text,juce::AccessibilityHandler::AnnouncementPriority::medium);
 #endif
@@ -125,6 +129,9 @@ private:
         if (onStepEnd) onStepEnd();
         announceValue();
     }
+#ifdef SCBRIDGE_WINDOWS7
+    LegacyWindowsAnnouncement legacyAnnouncement;
+#endif
     bool stepValue(const juce::KeyPress& key) {
         const auto code = key.getKeyCode();
         const double step = getInterval() > 0 ? getInterval() : 1.0;

@@ -1,4 +1,10 @@
-execute_process(COMMAND "${HELPER}" OUTPUT_FILE "${OUTPUT}" RESULT_VARIABLE result)
+if(DEFINED MODULE)
+    get_filename_component(MODULE "${MODULE}" ABSOLUTE)
+    execute_process(COMMAND "${HELPER}" -create -version "${VERSION}" -path "${MODULE}"
+        OUTPUT_FILE "${OUTPUT}" RESULT_VARIABLE result)
+else()
+    execute_process(COMMAND "${HELPER}" OUTPUT_FILE "${OUTPUT}" RESULT_VARIABLE result)
+endif()
 if(NOT result EQUAL 0)
     file(REMOVE "${OUTPUT}")
     message(FATAL_ERROR "VST3 manifest generation failed: ${result}")

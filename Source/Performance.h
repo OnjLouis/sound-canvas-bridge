@@ -29,7 +29,9 @@ inline juce::File performanceFile() {
     if(profile.isNotEmpty() && juce::File::isAbsolutePath(profile))
         return juce::File(profile).getChildFile("Settings.xml");
     return juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
-#ifdef _WIN32
+#if defined(SCBRIDGE_WINDOWS7)
+        .getChildFile("OnjMusic/SoundCanvasBridge-Windows7/Settings.xml");
+#elif defined(_WIN32)
         .getChildFile("OnjMusic/SoundCanvasBridge/Settings.xml");
 #else
         .getChildFile("Application Support/OnjMusic/SoundCanvasBridge/Settings.xml");

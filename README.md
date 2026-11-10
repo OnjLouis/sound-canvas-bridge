@@ -25,6 +25,8 @@ Each platform has its own installer and update channel.
 
 **[Windows installer and release notes](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/windows-v1.4.3)**
 
+**[Windows 7 SP1 portable edition](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/windows7-v1.4.3)** ([setup guide](Resources/Windows7Manual.html))
+
 **[Mac installer and release notes](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/v1.4.3)**
 
 [All releases](https://github.com/OnjLouis/sound-canvas-bridge/releases)
@@ -40,8 +42,8 @@ The same NKS download, mappings, previews and artwork work with both bridge buil
 ## Requirements
 
 - Mac: macOS 12 or later, Intel or Apple Silicon. The front ends are universal.
-- Windows: x64, .NET Framework 4.8 and a 64-bit original engine. Windows 11 is tested;
-  other Windows versions remain unverified.
+- Modern Windows installer: x64, .NET Framework 4.8 and a 64-bit original engine.
+  Windows 11 is tested. Windows 7 SP1 uses the separate portable edition.
 - Your own legitimate, working Sound Canvas VA VST installation, including its
   original engine and ROM resources. No Roland binaries, ROMs or licences are supplied.
 - Apple Silicon: a supported 32-bit Windows SCCore.dll, obtained from your own
@@ -66,7 +68,7 @@ Apps. Its Finish page can open the app and honours Start hidden. Uninstall remov
 the bridge app, VST3 and setup-created shortcuts, but keeps settings, NKS and Roland
 files. Existing shortcuts to the earlier
 per-user copy are migrated to the shared app. Windows x64 and .NET Framework 4.8
-are required; Windows 11 is tested, other Windows versions remain unverified.
+are required for that installer; Windows 11 is tested.
 The original Windows `SCCore.dll` must be 64-bit. No AU is installed on Windows.
 
 On Mac, open the DMG and run **Install Sound Canvas Bridge**. It installs the standalone app

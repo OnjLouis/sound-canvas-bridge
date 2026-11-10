@@ -19,10 +19,15 @@ public:
         browse.setButtonText("Browse...");browse.setName("Browse for Sound Canvas VA");browse.setExplicitFocusOrder(2);
         browse.setDescription(browse.getName());browse.setHelpText("Choose the original Sound Canvas VA engine, not the bridge. A valid selection is saved and offers an engine restart.");
         browse.setTooltip(browse.getHelpText());browse.onClick=[this] { chooseEngine(); };
-#ifdef _WIN32
+#ifdef _WIN64
         enginePath.setHelpText("The 64-bit Windows Sound Canvas VA SCCore.dll. This selection is shared by the standalone and VST3 and stays outside the bridge installation.");
         enginePath.setTooltip(enginePath.getHelpText());
         browse.setHelpText("Choose your own 64-bit SCCore.dll, not the bridge VST3 or a 32-bit engine. Reload existing instances after changing it.");
+        browse.setTooltip(browse.getHelpText());
+#elif defined(_WIN32)
+        enginePath.setHelpText("The 32-bit Windows Sound Canvas VA SCCore.dll. This selection is shared by the standalone and VST3 and stays outside the bridge installation.");
+        enginePath.setTooltip(enginePath.getHelpText());
+        browse.setHelpText("Choose your own 32-bit SCCore.dll, not the bridge VST3 or a 64-bit engine. Reload existing instances after changing it.");
         browse.setTooltip(browse.getHelpText());
 #elif defined(SCBRIDGE_TRANSLATED_ENGINE)
         enginePath.setHelpText("The 32-bit Windows Sound Canvas VA SCCore.dll used by the translated engine. This selection is shared by the standalone, AU and VST3. The DLL is kept outside the bridge bundles.");

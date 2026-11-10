@@ -1,6 +1,8 @@
 #pragma once
 #include <juce_audio_utils/juce_audio_utils.h>
-#ifdef _WIN32
+#if defined(_WIN32) && JUCE_MAJOR_VERSION < 8
+namespace scbridge { using VirtualMidiInput=juce::MidiInput; }
+#elif defined(_WIN32)
 #include "WindowsIpc.h"
 #include "VirtualMidiProtocol.h"
 namespace scbridge {

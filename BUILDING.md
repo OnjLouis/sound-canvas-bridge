@@ -62,6 +62,27 @@ bytes. Signing keys are not supplied. Derivative builds must use their own key
 and update channel; they are not accepted as official updates. Neither payload
 may contain Roland binaries, settings, logs, host projects or NKS content.
 
+## Windows 7 SP1
+
+Use a separate x86 or x64 MSVC developer shell and Windows SDK 10.0.18362.0.
+The legacy option targets Windows 7 SP1 with the secure DLL loader updates
+and pins JUCE 7.0.12, revision `4f43011b96eb0636104cb3e433894cda98243626`.
+Do not use the modern JUCE source or reuse its build directory.
+From the versioned legacy source ZIP:
+
+```powershell
+cmake -S . -B build-win7 -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DSCBRIDGE_WINDOWS7=ON -DJUCE_DIR=Dependencies/JUCE -DASIO_SDK_DIR=Dependencies/ASIO/ASIOSDK -DUNSHIELD_DIR=Dependencies/Unshield
+cmake --build build-win7 --parallel 4 --target SoundCanvasStandaloneBundle SoundCanvasPlugins
+```
+
+Use absolute dependency paths if configuring from another working directory.
+The portable Application and VST3 outputs are in the same relative locations
+as the modern build. The helper and original engine must match their
+architecture. Neither the installer/updater nor the preview MIDI Services
+runtime is used. Legacy binaries and corresponding JUCE 7 source are under
+GPLv3; the original bridge source is also available under MIT. Test on the
+target version of Windows before distributing a build for that architecture.
+
 ## macOS
 
 Use macOS 12 or later with Xcode and its command-line tools, CMake 3.22 or newer,

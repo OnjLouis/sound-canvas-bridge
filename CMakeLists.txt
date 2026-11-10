@@ -15,11 +15,24 @@ elseif(NOT WIN32)
 endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+option(SCBRIDGE_WINDOWS7 "Build the separate Windows 7 SP1 portable edition" OFF)
+set(scbridge_juce_revision 91ad83ae34a81e0833b1a2b0866f54846370ae53)
+if(SCBRIDGE_WINDOWS7)
+    if(NOT WIN32)
+        message(FATAL_ERROR "SCBRIDGE_WINDOWS7 requires Windows")
+    endif()
+    if(SCBRIDGE_INSTALLER_INPUT OR SCBRIDGE_BUILD_EXPERIMENTAL_MIDI)
+        message(FATAL_ERROR "The Windows 7 edition is portable and uses WinMM MIDI")
+    endif()
+    add_compile_definitions(SCBRIDGE_WINDOWS7=1 WINVER=0x0601 _WIN32_WINNT=0x0601)
+    link_libraries(oleacc)
+    set(scbridge_juce_revision 4f43011b96eb0636104cb3e433894cda98243626)
+endif()
 if(NOT DEFINED JUCE_DIR)
     include(FetchContent)
     FetchContent_Declare(juce
         GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-        GIT_TAG 91ad83ae34a81e0833b1a2b0866f54846370ae53)
+        GIT_TAG ${scbridge_juce_revision})
     FetchContent_MakeAvailable(juce)
 else()
     add_subdirectory("${JUCE_DIR}" "${CMAKE_BINARY_DIR}/juce")
@@ -203,24 +216,41 @@ else()
         target_link_options(SoundCanvasStandalone PRIVATE -static)
         target_link_options(SoundCanvasBridge_VST3 PRIVATE -static)
     endif()
+    set(scbridge_windows_manual WindowsManual.html)
+    set(scbridge_windows_history VersionHistory.html)
+    if(SCBRIDGE_WINDOWS7)
+        set(scbridge_windows_manual Windows7Manual.html)
+        set(scbridge_windows_history Windows7VersionHistory.html)
+    endif()
     add_custom_target(SoundCanvasStandaloneBundle
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/Resources/DawPresetsWindows.zip" "$<TARGET_FILE_DIR:SoundCanvasStandalone>/DAW Presets.zip"
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_BINARY_DIR}/SoundCanvasMaintenance.exe" "$<TARGET_FILE_DIR:SoundCanvasStandalone>"
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/Resources/WindowsUpdateKey.xml" "$<TARGET_FILE_DIR:SoundCanvasStandalone>"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:SoundCanvasHelper>" "$<TARGET_FILE_DIR:SoundCanvasStandalone>"
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/Resources/WindowsManual.html" "$<TARGET_FILE_DIR:SoundCanvasStandalone>/Manual.html"
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/Resources/VersionHistory.html" "$<TARGET_FILE_DIR:SoundCanvasStandalone>"
-        DEPENDS SoundCanvasStandalone SoundCanvasHelper SoundCanvasMaintenanceBuild VERBATIM)
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/Resources/${scbridge_windows_manual}" "$<TARGET_FILE_DIR:SoundCanvasStandalone>/Manual.html"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/Resources/${scbridge_windows_history}" "$<TARGET_FILE_DIR:SoundCanvasStandalone>/VersionHistory.html"
+        DEPENDS SoundCanvasStandalone SoundCanvasHelper VERBATIM)
+    if(NOT SCBRIDGE_WINDOWS7)
+        add_dependencies(SoundCanvasStandaloneBundle SoundCanvasMaintenanceBuild)
+        add_custom_command(TARGET SoundCanvasStandaloneBundle POST_BUILD
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_BINARY_DIR}/SoundCanvasMaintenance.exe" "$<TARGET_FILE_DIR:SoundCanvasStandalone>"
+            COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/Resources/WindowsUpdateKey.xml" "$<TARGET_FILE_DIR:SoundCanvasStandalone>"
+            VERBATIM)
+    endif()
     if(SCBRIDGE_BUILD_EXPERIMENTAL_MIDI)
         add_custom_target(SoundCanvasExperimentalMidiBundle
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:SoundCanvasMidiHost>" "$<TARGET_FILE_DIR:SoundCanvasStandalone>"
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${MIDI_RUNTIME_DLL}" "$<TARGET_FILE_DIR:SoundCanvasStandalone>"
             DEPENDS SoundCanvasStandaloneBundle SoundCanvasMidiHost VERBATIM)
     endif()
+    set(scbridge_manifest_options)
+    if(SCBRIDGE_WINDOWS7)
+        list(APPEND scbridge_manifest_options
+            "-DMODULE=$<TARGET_FILE_DIR:SoundCanvasBridge_VST3>/../.."
+            "-DVERSION=${PROJECT_VERSION}")
+    endif()
     add_custom_target(SoundCanvasPlugins
         COMMAND "${CMAKE_COMMAND}" -E make_directory "$<TARGET_FILE_DIR:SoundCanvasBridge_VST3>/../Resources"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:SoundCanvasHelper>" "$<TARGET_FILE_DIR:SoundCanvasBridge_VST3>/../Resources"
-        COMMAND "${CMAKE_COMMAND}" "-DHELPER=$<TARGET_FILE:SoundCanvasManifest>" "-DOUTPUT=$<TARGET_FILE_DIR:SoundCanvasBridge_VST3>/../Resources/moduleinfo.json" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/WriteManifest.cmake"
+        COMMAND "${CMAKE_COMMAND}" "-DHELPER=$<TARGET_FILE:SoundCanvasManifest>" "-DOUTPUT=$<TARGET_FILE_DIR:SoundCanvasBridge_VST3>/../Resources/moduleinfo.json" ${scbridge_manifest_options} -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/WriteManifest.cmake"
         DEPENDS SoundCanvasBridge_VST3 SoundCanvasHelper SoundCanvasManifest VERBATIM)
 endif()
 
@@ -322,6 +352,9 @@ if(BUILD_TESTING)
         set_tests_properties(WindowsInstallerWorkingDirectory PROPERTIES TIMEOUT 120)
         add_executable(WindowsUiTests Tests/WindowsUiTests.cpp "${SOURCE}/Processor.cpp")
         target_compile_definitions(WindowsUiTests PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 NOMINMAX WIN32_LEAN_AND_MEAN JUCE_MODAL_LOOPS_PERMITTED=1)
+        if(SCBRIDGE_WINDOWS7)
+            target_compile_definitions(WindowsUiTests PRIVATE _CONSOLE)
+        endif()
         add_dependencies(WindowsUiTests SoundCanvasEngineDownload)
         add_custom_command(TARGET WindowsUiTests POST_BUILD
             COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:SoundCanvasEngineDownload>" "$<TARGET_FILE_DIR:WindowsUiTests>/SoundCanvasEngineDownload.exe")

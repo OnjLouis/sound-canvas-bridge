@@ -91,7 +91,7 @@ void extractRuntime(Unshield* cabinet,const juce::File& job) {
     for(int i=group->first_file;i<=group->last_file;++i) {
         const auto* name=unshield_file_name(cabinet,i);
         if(name && juce::String(name)==
-#ifdef _WIN32
+#ifdef _WIN64
            "vcredist_x64.exe"
 #else
            "vcredist_x86.exe"
@@ -114,7 +114,13 @@ void extractRuntime(Unshield* cabinet,const juce::File& job) {
     RuntimeSelection inner{L".\\.\\.\\.\\vc_red.cab",innerFile,static_cast<uint32_t>(scbridge::officialRuntimeInnerBytes)};
     require(SetupIterateCabinetW(outer.getFullPathName().toWideCharPointer(),0,runtimeFile,&inner) && inner.found && !inner.error &&
             scbridge::engineHashMatches(inner.target,scbridge::officialRuntimeInnerHash),"Could not extract the verified runtime data cabinet.");
-    RuntimeSelection runtime{L"F_CENTRAL_msvcr100_x64",runtimeFileName,static_cast<uint32_t>(scbridge::officialRuntimeBytes)};
+    RuntimeSelection runtime{
+#ifdef _WIN64
+        L"F_CENTRAL_msvcr100_x64",
+#else
+        L"F_CENTRAL_msvcr100_x86",
+#endif
+        runtimeFileName,static_cast<uint32_t>(scbridge::officialRuntimeBytes)};
     require(SetupIterateCabinetW(inner.target.getFullPathName().toWideCharPointer(),0,runtimeFile,&runtime) && runtime.found && !runtime.error &&
             scbridge::engineHashMatches(runtime.target,scbridge::officialRuntimeHash),"Could not extract the verified app-local engine runtime.");
 #else

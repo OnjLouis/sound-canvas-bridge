@@ -4,6 +4,20 @@
 #include <atomic>
 
 namespace scbridge {
+#ifdef SCBRIDGE_WINDOWS7
+class UpdateService final {
+public:
+    UpdateService(AppPreferences&,juce::String) {}
+    void stop() {}
+    void start() {}
+    void preferencesChanged() {}
+    bool busy() const { return false; }
+    juce::String status() const { return "Automatic updates are unavailable in the Windows 7 edition."; }
+    void checkNow() {
+        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,"Check for Updates",status());
+    }
+};
+#else
 class UpdateService final : private juce::Timer,private juce::Thread {
 public:
     UpdateService(AppPreferences& value,juce::String version)
@@ -108,4 +122,5 @@ private:
     bool launching=false,manualRequest=false,preparing=false;
     juce::String releaseJSON,lastStatus="Automatic checks notify you; installation always requires confirmation.";
 };
+#endif
 }

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Sound Canvas Bridge for Windows 7</title>
+<h1>Sound Canvas Bridge for Windows 7</h1>
+<p>This portable edition runs on Windows 7 SP1 with the secure DLL-loading
+updates from KB2533623 or a later update that includes them. It uses its own
+settings and shortcuts. It does not replace the modern Windows installer.</p>
+<h2>Setup</h2>
+<ol>
+<li>Extract the whole ZIP. Keep all of the files in Application together.
+Open Sound Canvas Bridge.exe before opening the plug-in in a host.</li>
+<li>In Preferences, General, use Browse to select the original SCCore.dll.
+Use an engine of the same architecture as the bridge, and keep its runtime
+beside it. Download from Roland is also available if the system can connect
+to Roland over HTTPS. No Roland engine or ROM is included.</li>
+<li>In Audio and MIDI, select an audio output and the inputs you use.
+Play test phrase checks the selected output. Use a physical MIDI input or an
+existing software port; this edition does not install a virtual MIDI driver.</li>
+<li>For VST3, copy the entire Sound Canvas Bridge.vst3 folder to a folder
+scanned by your compatible VST3 host. The plug-in must match the host's
+architecture. Do not install the modern and legacy versions in the same host:
+they share the same plug-in ID.</li>
+</ol>
+<h2>Keyboard and screen reader</h2>
+<p>Tab and Shift+Tab move between controls. Control+comma opens Preferences,
+F1 opens focused-control help, F9 sends All Notes Off, and Control+Q quits.
+Escape closes help, preferences or the browser. Use the application menu for
+reset, activity and tray commands.</p>
+<p>On Current sound and Control page, arrow keys step, Page Up and Page Down
+move ten entries, and Home and End go to the limits. Press Enter on Current
+sound to open the searchable preset list. Slider values can be stepped or
+typed with Enter. A Windows 7 screen reader may say "alert" after an announced
+change; the bridge does not use its own speech synthesiser for those changes.</p>
+<h2>Updates and presets</h2>
+<p>This legacy edition has no automatic updater. Check the
+<a href="https://github.com/OnjLouis/sound-canvas-bridge/releases">GitHub releases</a>
+for Windows 7 ZIPs. Close the bridge and any host using it before replacing
+the program files. Keep your user settings and original engine separate.</p>
+<p>Grouped VST3 presets are included. The
+<a href="https://onj.me/nks">Sound Canvas NKS pack</a> is separate and requires a
+compatible Komplete Kontrol installation.</p>
+</html>

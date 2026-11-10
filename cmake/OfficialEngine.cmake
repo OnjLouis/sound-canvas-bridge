@@ -41,12 +41,16 @@ target_link_libraries(SoundCanvasEngineDownload PRIVATE juce::juce_cryptography 
 add_dependencies(SoundCanvasStandalone SoundCanvasEngineDownload)
 if(WIN32)
     get_target_property(scbridge_modules juce_core INTERFACE_JUCE_MODULE_PATH)
+    set(zlib_notice LICENSE)
+    if(SCBRIDGE_WINDOWS7)
+        set(zlib_notice README)
+    endif()
     target_compile_definitions(SoundCanvasEngineDownload PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
     target_link_libraries(SoundCanvasEngineDownload PRIVATE setupapi)
     add_custom_command(TARGET SoundCanvasStandalone POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:SoundCanvasEngineDownload>" "$<TARGET_FILE_DIR:SoundCanvasStandalone>/SoundCanvasEngineDownload.exe"
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${UNSHIELD_DIR}/LICENSE" "$<TARGET_FILE_DIR:SoundCanvasStandalone>/Unshield Licence.txt"
-        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${scbridge_modules}/juce_core/zip/zlib/LICENSE" "$<TARGET_FILE_DIR:SoundCanvasStandalone>/Zlib Licence.txt")
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different "${scbridge_modules}/juce_core/zip/zlib/${zlib_notice}" "$<TARGET_FILE_DIR:SoundCanvasStandalone>/Zlib Licence.txt")
 else()
 set_target_properties(SoundCanvasEngineDownload PROPERTIES OSX_ARCHITECTURES "arm64;x86_64")
 add_custom_command(TARGET SoundCanvasStandalone POST_BUILD

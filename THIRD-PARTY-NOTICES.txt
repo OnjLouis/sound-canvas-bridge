@@ -14,6 +14,12 @@ JUCE's upstream licence and bundled-dependency list are included in ThirdParty.
 The exact source revision, build instructions and complete project source are
 available at https://github.com/OnjLouis/sound-canvas-bridge.
 
+The separate Windows 7 portable edition uses JUCE 7.0.12
+(4f43011b96eb0636104cb3e433894cda98243626), not JUCE 8. That edition's JUCE
+application and plug-in are distributed under GNU GPL version 3. Its
+corresponding source archive includes the pinned JUCE source, the GPLv3
+ASIO SDK option and the engine extraction dependencies.
+
 Clipman startup/update preferences patterns
 Copyright (c) 2026 Clipman contributors. MIT.
 

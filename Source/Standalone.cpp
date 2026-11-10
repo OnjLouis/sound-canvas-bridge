@@ -578,7 +578,11 @@ public:
 class MainContent final : public juce::Component {
 public:
     MainContent(juce::AudioProcessor& processor,scbridge::MidiActivity& activity,bool visible,std::function<void(int)> applyMap={})
+#if JUCE_MAJOR_VERSION >= 8
         :editor(processor.createEditorAndMakeActive()),display(activity) {
+#else
+        :editor(processor.createEditorIfNeeded()),display(activity) {
+#endif
         setName("Sound Canvas controls");
         if(applyMap) scbridge::configureStandaloneEditor(*editor,std::move(applyMap));
         setFocusContainerType(juce::Component::FocusContainerType::keyboardFocusContainer);
@@ -598,6 +602,19 @@ private:
     std::unique_ptr<juce::AudioProcessorEditor> editor;
     scbridge::ActivityDisplay display;
 };
+
+#ifdef SCBRIDGE_WINDOWS7
+static void fitLegacyStandaloneToDisplay() {
+    auto& desktop=juce::Desktop::getInstance();
+    if(const auto* display=desktop.getDisplays().getPrimaryDisplay()) {
+        // Leave room for the title bar and fit both the editor and its activity display.
+        constexpr float width=700.0f+212.0f+32.0f;
+        constexpr float height=762.0f+96.0f;
+        const auto scale=std::min({1.0f,display->userArea.getWidth()/width,display->userArea.getHeight()/height});
+        if(scale>0.0f && scale<1.0f) desktop.setGlobalScaleFactor(desktop.getGlobalScaleFactor()*scale);
+    }
+}
+#endif
 
 class MainWindow final : public juce::DocumentWindow {
 public:
@@ -670,11 +687,20 @@ private:
 
 class Standalone final : public juce::JUCEApplication,private juce::MenuBarModel,private juce::ChangeListener {
 public:
-    const juce::String getApplicationName() override { return "Sound Canvas Bridge"; }
+    const juce::String getApplicationName() override {
+#ifdef SCBRIDGE_WINDOWS7
+        return "Sound Canvas Bridge (Windows 7)";
+#else
+        return "Sound Canvas Bridge";
+#endif
+    }
     const juce::String getApplicationVersion() override { return appVersion(); }
     bool moreThanOneInstanceAllowed() override { return false; }
     void initialise(const juce::String& commandLine) override {
         juce::LookAndFeel::getDefaultLookAndFeel().setUsingNativeAlertWindows(true);
+#ifdef SCBRIDGE_WINDOWS7
+        fitLegacyStandaloneToDisplay();
+#endif
         auto directory=applicationData();
         if(!directory.createDirectory().wasOk()) {
             juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Sound Canvas Bridge","Could not create the application settings folder.");
@@ -712,14 +738,18 @@ public:
         devices.addMidiInputDeviceCallback({},&midiInput);
         const auto arguments=juce::StringArray::fromTokens(commandLine,true);
         const bool requestVirtualMidi=!arguments.contains("--no-virtual-midi")
-#ifdef _WIN32
+#if defined(_WIN32) && JUCE_MAJOR_VERSION >= 8
             && arguments.contains("--experimental-native-midi")
+#elif defined(_WIN32)
+            && false
 #endif
             ;
         // Current Windows builds can deadlock the MIDI service during virtual
         // device teardown (Microsoft/MIDI #1047). Never opt users in silently.
+#if !defined(_WIN32) || JUCE_MAJOR_VERSION >= 8
         if(requestVirtualMidi)
             virtualInput=scbridge::VirtualMidiInput::createNewDevice(virtualPortName,&midiInput);
+#endif
         if(virtualInput) { virtualInput->start();juce::Logger::writeToLog("Virtual MIDI input ready"); }
         else if(requestVirtualMidi)
             juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"MIDI input","Could not create the Sound Canvas Bridge virtual MIDI input. Physical MIDI inputs and audio remain available.");

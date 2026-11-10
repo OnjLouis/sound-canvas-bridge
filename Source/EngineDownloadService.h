@@ -29,7 +29,13 @@ private:
         const auto cache=juce::File::isAbsolutePath(isolated) ? juce::File(isolated).getChildFile("Download Cache") :
             juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
 #ifdef _WIN32
-            .getChildFile("OnjMusic/SoundCanvasBridge/Download Cache")
+            .getChildFile(
+#ifdef SCBRIDGE_WINDOWS7
+                "OnjMusic/SoundCanvasBridge-Windows7/Download Cache"
+#else
+                "OnjMusic/SoundCanvasBridge/Download Cache"
+#endif
+            )
 #else
             .getChildFile("Caches/OnjMusic/SoundCanvasBridge")
 #endif

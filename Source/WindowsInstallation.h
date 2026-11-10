@@ -8,10 +8,10 @@ public:
         PWSTR path=nullptr;
         if(FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData,0,nullptr,&path))) return {};
         const juce::File base{juce::String(path)};CoTaskMemFree(path);
-        return base.getChildFile("Programs/OnjMusic/Sound Canvas Bridge");
+        return base.getChildFile("Programs/OnjMusic").getChildFile(installationFolderName());
     }
     static juce::File defaultDirectory() {
-        const auto shared=juce::File::getSpecialLocation(juce::File::globalApplicationsDirectory).getChildFile("OnjMusic/Sound Canvas Bridge");
+        const auto shared=juce::File::getSpecialLocation(juce::File::globalApplicationsDirectory).getChildFile("OnjMusic").getChildFile(installationFolderName());
         return WindowsInstallation(shared).existingExecutable()!=juce::File{} ? shared : localDirectory();
     }
     explicit WindowsInstallation(juce::File directory=defaultDirectory()):destination(std::move(directory)) {}
@@ -73,6 +73,13 @@ public:
         return juce::Result::ok();
     }
 private:
+    static constexpr const char* installationFolderName() {
+#ifdef SCBRIDGE_WINDOWS7
+        return "Sound Canvas Bridge Windows 7";
+#else
+        return "Sound Canvas Bridge";
+#endif
+    }
     static constexpr int64_t maxFileSize=64*1024*1024;
     static juce::StringArray requiredFiles() { return {"Sound Canvas Bridge.exe","SoundCanvasHelper.exe","Manual.html","VersionHistory.html"}; }
     static bool safeAncestors(juce::File path) {

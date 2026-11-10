@@ -108,6 +108,10 @@ public:
             auto help = controlHelp(i);
             if (!isChoice && !isSwitch) help += " Arrow keys change one step; Page Up and Page Down change ten steps; Home and End select the limits. Enter opens direct value entry; Enter confirms and Escape cancels.";
             control.setDescription(names[i]); control.setHelpText(help);
+#ifdef SCBRIDGE_WINDOWS7
+            control.getProperties().set(scbridge::explicitHelpProperty,help);
+            control.setHelpText({});
+#endif
             control.setWantsKeyboardFocus(true); control.setExplicitFocusOrder(static_cast<int>(i + 1));
             labels[i].setText(names[i], juce::dontSendNotification); labels[i].setAccessible(false);
             addAndMakeVisible(labels[i]); addAndMakeVisible(control);
@@ -115,7 +119,10 @@ public:
                 toggles[i].setTooltip(help);
                 buttonAttachments[i]=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(state,ids[i],toggles[i]);
             } else if (isChoice) {
-                auto& choice = choices[i]; choice.setTooltip(help);
+                auto& choice = choices[i];
+#ifndef SCBRIDGE_WINDOWS7
+                choice.setTooltip(help);
+#endif
                 auto* parameter=state.getParameter(ids[i]);
                 juce::StringArray items;
                 for(int value=scbridge::controls[i].minimum;value<=scbridge::controls[i].maximum;++value)
@@ -140,6 +147,11 @@ public:
         page.setComponentID("controlPage");page.setName("Control page");page.setTitle("Control page");
         page.setTooltip("Selects Main, Tone, Master, Reverb, Chorus, Delay, EQ, Drums or Insertion controls. Insertion Parameters pages expose all 20 slots directly. Up and Down select adjacent pages; Home and End select the first and last; Page Up and Page Down move ten entries. This changes only the displayed controls, not the sound.");
         page.setDescription(page.getName());page.setHelpText(page.getTooltip());
+#ifdef SCBRIDGE_WINDOWS7
+        page.setTooltip({});
+        page.getProperties().set(scbridge::explicitHelpProperty,page.getHelpText());
+        page.setHelpText({});
+#endif
         page.addItemList({"Main","Tone","Master","Reverb","Chorus","Delay","EQ","Drums","Insertion","Insertion Parameters 1-10","Insertion Parameters 11-20"},1);
         page.setSelectedId(1,juce::dontSendNotification);
         page.onChange=[this] { showPage(); };page.setExplicitFocusOrder(1);
@@ -205,7 +217,15 @@ public:
         status.setHelpText("Reports engine readiness, scheduling interruptions and missing engine errors.");
         addAndMakeVisible(status);
         auto* display=juce::Desktop::getInstance().getDisplays().getPrimaryDisplay();
-        setSize(700,display ? juce::jlimit(700,762,juce::roundToInt(display->userBounds.getHeight())-50) : 762);
+        int availableHeight=812;
+        if(display) {
+#if JUCE_MAJOR_VERSION >= 8
+            availableHeight=juce::roundToInt(display->userBounds.getHeight());
+#else
+            availableHeight=display->userArea.getHeight();
+#endif
+        }
+        setSize(700,juce::jlimit(700,762,availableHeight-50));
         showPage(); timerCallback(); startTimerHz(2);
     }
     ~BridgeEditor() override { stopTimer(); setVisible(false); }
@@ -248,8 +268,13 @@ public:
             }
             updateEnabledControls();
         };
-        choices[1].setHelpText("With a numbered part selected, changes that part's map. With All selected, applies the chosen map to all 16 parts without changing their bank, program, mixer or effects. This is the last requested map; subsequent MIDI can override individual parts.");
+        const auto mapHelp="With a numbered part selected, changes that part's map. With All selected, applies the chosen map to all 16 parts without changing their bank, program, mixer or effects. This is the last requested map; subsequent MIDI can override individual parts.";
+#ifdef SCBRIDGE_WINDOWS7
+        choices[1].getProperties().set(scbridge::explicitHelpProperty,mapHelp);
+#else
+        choices[1].setHelpText(mapHelp);
         choices[1].setTooltip(choices[1].getHelpText());
+#endif
         sliders[0].setVisible(false);addAndMakeVisible(partScope);showPage();
     }
     void resized() override {

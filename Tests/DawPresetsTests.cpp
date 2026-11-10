@@ -9,14 +9,22 @@ static juce::File package(const juce::File& root,const char* name,const juce::St
     auto* manifest=new juce::DynamicObject;
     manifest->setProperty("product","Sound Canvas Bridge");manifest->setProperty("formatVersion",1);manifest->setProperty("files",juce::var(files));
     juce::ZipFile::Builder builder;
-    builder.addEntry(std::make_unique<juce::MemoryInputStream>(content.toRawUTF8(),content.getNumBytesAsUTF8(),true),6,path,juce::Time{});
+    auto addEntry=[&](const juce::String& value,const juce::String& entryPath) {
+        auto input=std::make_unique<juce::MemoryInputStream>(value.toRawUTF8(),value.getNumBytesAsUTF8(),true);
+#if JUCE_MAJOR_VERSION >= 8
+        builder.addEntry(std::move(input),6,entryPath,juce::Time{});
+#else
+        builder.addEntry(input.release(),6,entryPath,juce::Time{});
+#endif
+    };
+    addEntry(content,path);
     if(withDrums) {
         const juce::String drumPath="Drums/SC-8820/Standard 1.vstpreset",drumContent=content+" drums";
         files->setProperty(drumPath,juce::SHA256(drumContent.toRawUTF8(),drumContent.getNumBytesAsUTF8()).toHexString());
-        builder.addEntry(std::make_unique<juce::MemoryInputStream>(drumContent.toRawUTF8(),drumContent.getNumBytesAsUTF8(),true),6,drumPath,juce::Time{});
+        addEntry(drumContent,drumPath);
     }
     const auto json=juce::JSON::toString(juce::var(manifest));
-    builder.addEntry(std::make_unique<juce::MemoryInputStream>(json.toRawUTF8(),json.getNumBytesAsUTF8(),true),6,"manifest.json",juce::Time{});
+    addEntry(json,"manifest.json");
     const auto file=root.getChildFile(name);juce::FileOutputStream output(file);
     require(output.openedOk() && builder.writeToStream(output,nullptr),"Cannot write fixture archive");return file;
 }

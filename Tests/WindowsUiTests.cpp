@@ -7,9 +7,32 @@
 #include "PreferencesStartupFixture.h"
 #include "EngineDownloadFixture.h"
 
-int main(int argc,char** argv) {
-    juce::ScopedJuceInitialiser_GUI gui;
-    if(argc==2 && std::string(argv[1])=="--download-flow") return engineDownloadFixture::run();
+#ifdef SCBRIDGE_WINDOWS7
+namespace {
+juce::String legacyAlertText;
+void CALLBACK readLegacyAlert(HWINEVENTHOOK,DWORD,HWND hwnd,LONG object,LONG child,DWORD,DWORD) {
+    IAccessible* accessible=nullptr;
+    VARIANT childId{};
+    if(SUCCEEDED(AccessibleObjectFromEvent(hwnd,object,child,&accessible,&childId)) && accessible) {
+        VARIANT role{};
+        BSTR name=nullptr;
+        if(SUCCEEDED(accessible->get_accRole(childId,&role)) && role.vt==VT_I4 && role.lVal==ROLE_SYSTEM_ALERT &&
+           SUCCEEDED(accessible->get_accName(childId,&name)) && name)
+            legacyAlertText=juce::String(name);
+        SysFreeString(name);
+        VariantClear(&role);
+        accessible->Release();
+    }
+    VariantClear(&childId);
+}
+}
+#endif
+
+static int runUiChecks(const juce::StringArray& args) {
+#ifdef SCBRIDGE_WINDOWS7
+    fitLegacyStandaloneToDisplay();
+#endif
+    if(args.size()==1 && args[0]=="--download-flow") return engineDownloadFixture::run();
     int failures=0;
     auto check=[&](bool success,const char* message) {
         if(!success) { std::cerr<<"FAIL: "<<message<<'\n';++failures; }
@@ -56,6 +79,10 @@ int main(int argc,char** argv) {
     check(main.keyPressed(juce::KeyPress(juce::KeyPress::tabKey)),
         "Tab must recover a missing main-window focus target");
     main.setVisible(true);main.toFront(true);
+#ifdef SCBRIDGE_WINDOWS7
+    // Let the production window's deferred initial focus settle before testing another control.
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+#endif
     check(focusFirstControl(*main.getContentComponent()),"A visible main window must actually focus a control");
     auto* focused=juce::Component::getCurrentlyFocusedComponent();
     check(focused && focused->getName()=="Control page","Initial focus must land on Control page, not a layout wrapper");
@@ -66,8 +93,20 @@ int main(int argc,char** argv) {
     if(preset) {
         preset->grabKeyboardFocus();
         main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::homeKey));
+#ifdef SCBRIDGE_WINDOWS7
+        legacyAlertText.clear();
+        const auto alertHook=SetWinEventHook(EVENT_SYSTEM_ALERT,EVENT_SYSTEM_ALERT,nullptr,readLegacyAlert,
+                                            GetCurrentProcessId(),GetCurrentThreadId(),WINEVENT_OUTOFCONTEXT);
+        check(alertHook!=nullptr,"Subscribe to native legacy accessibility events");
+#endif
         main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::pageDownKey));
         check(preset->getSelectedItemIndex()==10 && processor->getCurrentProgram()==preset->getItemId(10)-1,"Standalone must route Page Down from the focused current-sound selector");
+#ifdef SCBRIDGE_WINDOWS7
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+        check(legacyAlertText==preset->getText(),"Preset keyboard changes must announce the selected name through MSAA");
+        check(preset->hasKeyboardFocus(true),"The legacy announcement must not take focus away from the preset selector");
+        if(alertHook) UnhookWinEvent(alertHook);
+#endif
         main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::endKey));
         check(preset->getSelectedItemIndex()==preset->getNumItems()-1,"Standalone must route End to the last sound");
         main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::homeKey));
@@ -98,7 +137,7 @@ int main(int argc,char** argv) {
                 selectedRow=table ? table->getRowHandler(list->getSelectedRow()) : nullptr;
                 check(accessibleFocus && accessibleFocus==selectedRow,"Preset arrows must expose the new selected row as accessibility focus");
             }
-            if(argc==3 && std::string(argv[2])=="--inspect-browser") {
+            if(args.size()==2 && args[1]=="--inspect-browser") {
                 std::cout<<"Browser inspection ready\n"<<std::flush;
                 juce::MessageManager::getInstance()->runDispatchLoopUntil(90000);
             }
@@ -109,6 +148,10 @@ int main(int argc,char** argv) {
     auto* controlPage=dynamic_cast<juce::ComboBox*>(editor->findChildWithID("controlPage"));
     check(controlPage!=nullptr,"Standalone must expose the control-page selector");
     if(controlPage) {
+#ifdef SCBRIDGE_WINDOWS7
+        check(controlPage->getAccessibilityHandler()->getHelp().isEmpty() && scbridge::contextHelp(*controlPage).isNotEmpty(),
+            "Control-page instructions must remain on F1 without verbose focus announcements");
+#endif
         const auto sound=processor->getCurrentProgram();
         controlPage->grabKeyboardFocus();
         main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::endKey));
@@ -278,9 +321,9 @@ int main(int argc,char** argv) {
         check(editor->findChildWithID("program")->isEnabled(),"A numbered part must restore ordinary edits");
         check(processor->getParameters().size()==93,"Standalone All must not change the VST/NKS parameter contract");
     }
-    if((argc!=2 && argc!=3) || !juce::File::isAbsolutePath(argv[1])) {check(false,"An isolated test-files folder is required");}
+    if((args.size()!=1 && args.size()!=2) || !juce::File::isAbsolutePath(args[0])) {check(false,"An isolated test-files folder is required");}
     else {
-        const auto root=juce::File(argv[1]).getNonexistentChildFile("shortcut-fixture",{});
+        const auto root=juce::File(args[0]).getNonexistentChildFile("shortcut-fixture",{});
         const auto source=root.getChildFile("portable"),local=root.getChildFile("installed"),desktop=root.getChildFile("desktop"),login=root.getChildFile("startup");
         check(source.createDirectory().wasOk() && desktop.createDirectory().wasOk() && login.createDirectory().wasOk(),"Create isolated shortcut fixture");
         const juce::StringArray files{"Sound Canvas Bridge.exe","SoundCanvasHelper.exe","Manual.html","VersionHistory.html","SCCore.dll","Settings.xml"};
@@ -296,26 +339,43 @@ int main(int argc,char** argv) {
         check(installation.install(source.getChildFile("Sound Canvas Bridge.exe")).wasOk(),"Identical local installation must be reusable");
         juce::String error;
         check(scbridge::StartupService::addDesktopShortcut(installation.executable(),error,desktop),"Create isolated desktop shortcut");
-        const auto shortcut=desktop.getChildFile("Sound Canvas Bridge.lnk");
+        const auto shortcut=desktop.getChildFile(
+#ifdef SCBRIDGE_WINDOWS7
+            "Sound Canvas Bridge Windows 7.lnk"
+#else
+            "Sound Canvas Bridge.lnk"
+#endif
+        );
         juce::MemoryBlock before;shortcut.loadFileAsData(before);
-        check(scbridge::StartupService::addDesktopShortcut(installation.executable(),error,desktop),"Desktop shortcut creation must be idempotent");
+        check(before.getSize()>0,"The desktop shortcut must use the correct release-family filename");
+        wchar_t shortTarget[MAX_PATH]{}, longTarget[MAX_PATH]{};
+        const auto appPath=installation.executable().getFullPathName();
+        const auto shortLength=GetShortPathNameW(appPath.toWideCharPointer(),shortTarget,MAX_PATH);
+        const auto longLength=GetLongPathNameW(appPath.toWideCharPointer(),longTarget,MAX_PATH);
+        check(longLength>0 && longLength<MAX_PATH,"Resolve the fixture application's long path");
+        const auto equivalentApp=shortLength>0 && shortLength<MAX_PATH ? juce::File(juce::String(shortTarget)) : installation.executable();
+        check(scbridge::StartupService::addDesktopShortcut(equivalentApp,error,desktop),"An equivalent short application path must not invalidate an owned shortcut");
         juce::MemoryBlock after;shortcut.loadFileAsData(after);check(before==after,"Existing correct desktop shortcut must be unchanged");
         IShellLinkW* link=nullptr;
         check(SUCCEEDED(CoCreateInstance(CLSID_ShellLink,nullptr,CLSCTX_INPROC_SERVER,IID_IShellLinkW,reinterpret_cast<void**>(&link))),"Read back the generated shortcut");
         if(link) {
             IPersistFile* persistence=nullptr;
             if(SUCCEEDED(link->QueryInterface(IID_IPersistFile,reinterpret_cast<void**>(&persistence)))) {
-                wchar_t target[32768]{},arguments[32768]{};
+                wchar_t target[MAX_PATH]{},arguments[MAX_PATH]{};
                 check(SUCCEEDED(persistence->Load(shortcut.getFullPathName().toWideCharPointer(),STGM_READ)),"Load saved desktop shortcut");
-                check(SUCCEEDED(link->GetPath(target,32768,nullptr,SLGP_RAWPATH)) && juce::File(juce::String(target))==installation.executable(),"Desktop shortcut must target the local installation");
-                check(SUCCEEDED(link->GetArguments(arguments,32768)) && juce::String(arguments)=="--show-controls","Desktop launch must explicitly restore controls");
+                wchar_t longLinkTarget[MAX_PATH]{};
+                check(link->GetPath(target,MAX_PATH,nullptr,SLGP_RAWPATH)==S_OK &&
+                      GetLongPathNameW(target,longLinkTarget,MAX_PATH)==longLength &&
+                      juce::File(juce::String(longLinkTarget))==juce::File(juce::String(longTarget)),
+                    "Desktop shortcut must target the local installation");
+                check(SUCCEEDED(link->GetArguments(arguments,MAX_PATH)) && juce::String(arguments)=="--show-controls","Desktop launch must explicitly restore controls");
                 persistence->Release();
             } else check(false,"Read shortcut persistence interface");
             link->Release();
         }
         scbridge::StartupService startupFixture(login);
         check(startupFixture.setEnabled(true,installation.executable(),error),"Startup must target the local installation");
-        check(startupFixture.setEnabled(false,installation.executable(),error) && !startupFixture.enabled(),"Disabling startup must restore absence of its shortcut");
+        check(startupFixture.setEnabled(false,equivalentApp,error) && !startupFixture.enabled(),"Disabling startup with an equivalent path must remove its shortcut");
         shortcut.replaceWithText("unrelated shortcut");
         check(!scbridge::StartupService::addDesktopShortcut(installation.executable(),error,desktop) && shortcut.loadFileAsString()=="unrelated shortcut","An unrelated desktop file must not be overwritten");
         source.getChildFile("SoundCanvasHelper.exe").replaceWithText("changed source");
@@ -333,3 +393,28 @@ int main(int argc,char** argv) {
     std::cout<<"Windows UI failures: "<<failures<<'\n';
     return failures ? 1 : 0;
 }
+
+#ifdef SCBRIDGE_WINDOWS7
+class WindowsUiFixtureApplication final : public juce::JUCEApplication {
+public:
+    const juce::String getApplicationName() override { return "Sound Canvas UI test"; }
+    const juce::String getApplicationVersion() override { return "1"; }
+    void initialise(const juce::String&) override {
+        // Real desktop tests need the same UIA/COM lifecycle as the standalone.
+        juce::MessageManager::callAsync([this] {
+            setApplicationReturnValue(runUiChecks(getCommandLineParameterArray()));
+            quit();
+        });
+    }
+    void shutdown() override {}
+};
+
+START_JUCE_APPLICATION(WindowsUiFixtureApplication)
+#else
+int main(int argc,char** argv) {
+    juce::ScopedJuceInitialiser_GUI gui;
+    juce::StringArray arguments;
+    for(int i=1;i<argc;++i) arguments.add(argv[i]);
+    return runUiChecks(arguments);
+}
+#endif

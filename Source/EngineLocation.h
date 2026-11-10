@@ -71,7 +71,7 @@ public:
     }
     static bool validate(const juce::File& selected,juce::String& error) {
 #if defined(_WIN32) || defined(SCBRIDGE_TRANSLATED_ENGINE)
-#ifdef _WIN32
+#ifdef _WIN64
         error="Choose the original 64-bit Sound Canvas VA SCCore.dll from your own installation.";
         constexpr uint16_t machine=0x8664,optionalMagic=0x20b;
 #else

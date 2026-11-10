@@ -12,7 +12,7 @@ inline constexpr const char* officialEngineLicence="https://in.roland.com/suppor
 inline constexpr const char* officialArchiveHash="2753e1a5699a577aaf468e1fa9b6a293687fa29292bca9258c0fc83fb258680d";
 inline constexpr const char* officialInstallerHash="6dcf35d208903eab9e50f8b492d5899e66dd0b7510e7c2e31b419531d7c9f67d";
 inline constexpr int64_t officialArchiveBytes=96055960,officialInstallerBytes=97012512;
-#ifdef _WIN32
+#ifdef _WIN64
 inline constexpr const char* officialCoreHash="e95e7f8f97667c247cccb8b15735cba949a07e92673a6a5411116d18e2268c47";
 inline constexpr int64_t officialCoreBytes=27440128;
 inline constexpr const char* officialCoreGroup="SoundCanvas64";
@@ -26,7 +26,7 @@ inline constexpr const char* officialRuntimeHash="60c06e0fa4449314da3a0a87c1a9d9
 inline constexpr int64_t officialRuntimeBytes=773968;
 #endif
 struct OfficialPayload { const char* name; int64_t offset,size; const char* sha256; };
-#ifdef _WIN32
+#ifdef _WIN64
 inline constexpr const char* officialRedistributableHash="c6cd2d3f0b11dc2a604ffdc4dd97861a83b77e21709ba71b962a47759c93f4c8";
 inline constexpr int64_t officialRedistributableBytes=5673816;
 inline constexpr OfficialPayload officialRuntimeCab{"runtime-outer.cab",41984,5625404,"07ba4fd3a4cc15108584bf2dc2fe1fafabf26196ce4128b6399c3729d1f60b10"};

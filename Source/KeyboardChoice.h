@@ -1,12 +1,16 @@
 #pragma once
 #include <juce_gui_basics/juce_gui_basics.h>
+#include "LegacyWindowsAccessibility.h"
 
 namespace scbridge {
 inline constexpr int keyboardChoicePageStep=10;
 class KeyboardChoice : public juce::ComboBox {
 public:
     void announceKeyboardValue() {
-        if(auto* handler=getAccessibilityHandler()) handler->notifyAccessibilityEvent(juce::AccessibilityEvent::valueChanged);
+#ifdef SCBRIDGE_WINDOWS7
+        if(!legacyAnnouncement.post(*this,getText()))
+#endif
+            if(auto* handler=getAccessibilityHandler()) handler->notifyAccessibilityEvent(juce::AccessibilityEvent::valueChanged);
         const auto text=getName()+", "+getText();
 #ifdef SCBRIDGE_TEST_ANNOUNCEMENTS
         getProperties().set("lastKeyboardAnnouncement",text);
@@ -37,5 +41,9 @@ public:
         }
         return juce::ComboBox::keyPressed(key);
     }
+#ifdef SCBRIDGE_WINDOWS7
+private:
+    LegacyWindowsAnnouncement legacyAnnouncement;
+#endif
 };
 }
