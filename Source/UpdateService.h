@@ -2,22 +2,11 @@
 #include "AppPreferences.h"
 #include "UpdatePresentation.h"
 #include <atomic>
+#ifdef SCBRIDGE_WINDOWS7
+#include "PortableUpdate.h"
+#endif
 
 namespace scbridge {
-#ifdef SCBRIDGE_WINDOWS7
-class UpdateService final {
-public:
-    UpdateService(AppPreferences&,juce::String) {}
-    void stop() {}
-    void start() {}
-    void preferencesChanged() {}
-    bool busy() const { return false; }
-    juce::String status() const { return "Automatic updates are unavailable in the Windows 7 edition."; }
-    void checkNow() {
-        juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::InfoIcon,"Check for Updates",status());
-    }
-};
-#else
 class UpdateService final : private juce::Timer,private juce::Thread {
 public:
     UpdateService(AppPreferences& value,juce::String version)
@@ -53,13 +42,17 @@ private:
     }
     void run() override {
         const auto helper=juce::File::getSpecialLocation(juce::File::currentExecutableFile)
-#ifdef _WIN32
+#if defined(SCBRIDGE_WINDOWS7)
+            .getParentDirectory().getChildFile("SoundCanvasUpdateCheck.exe");
+#elif defined(_WIN32)
             .getParentDirectory().getChildFile("SoundCanvasMaintenance.exe");
 #else
             .getParentDirectory().getParentDirectory().getChildFile("Resources/SoundCanvasMaintenance");
 #endif
         juce::ChildProcess child;
-#ifdef _WIN32
+#if defined(SCBRIDGE_WINDOWS7)
+        juce::StringArray arguments{helper.getFullPathName(),current};
+#elif defined(_WIN32)
         juce::StringArray arguments{helper.getFullPathName(),preparing ? "--prepare-base64" : "--check",
             preparing ? juce::Base64::toBase64(releaseJSON.toRawUTF8(),releaseJSON.getNumBytesAsUTF8()) : current};
 #else
@@ -93,6 +86,20 @@ private:
             if(state=="available") {
                 auto release=result.getProperty("release",{});
                 const auto version=release.getProperty("version",{}).toString();
+#ifdef SCBRIDGE_WINDOWS7
+                if(!portableVersion(version)) {
+                    lastStatus="The update helper returned an invalid version.";
+                    if(wasManual) juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Check for Updates",lastStatus);
+                    return;
+                }
+                lastStatus="Version "+version+" is available.";
+                juce::AlertWindow::showOkCancelBox(juce::MessageBoxIconType::InfoIcon,"Sound Canvas Bridge "+version+" Is Available",
+                    "Open the Windows 7 release page to download the matching portable ZIP? No files will be replaced.",
+                    "Open Release Page","Later",nullptr,juce::ModalCallbackFunction::create([token,version](int choice) {
+                        if(token->load() && choice)
+                            juce::URL(portableReleasePage+version).launchInDefaultBrowser();
+                    }));
+#else
                 lastStatus="Version "+version+" is available.";
                 juce::AlertWindow::showOkCancelBox(juce::MessageBoxIconType::InfoIcon,"Sound Canvas Bridge "+version+" Is Available",
 #ifdef _WIN32
@@ -105,6 +112,7 @@ private:
                         releaseJSON=juce::JSON::toString(release,true);preparing=true;manualRequest=true;
                         lastStatus="Downloading and verifying the update...";startThread();
                     }));
+#endif
                 return;
             }
             lastStatus=message.isNotEmpty() ? message : failed ? output : "The update server returned an invalid response.";
@@ -122,5 +130,4 @@ private:
     bool launching=false,manualRequest=false,preparing=false;
     juce::String releaseJSON,lastStatus="Automatic checks notify you; installation always requires confirmation.";
 };
-#endif
 }

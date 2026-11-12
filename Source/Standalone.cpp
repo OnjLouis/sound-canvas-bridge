@@ -25,7 +25,7 @@ namespace {
 enum Command : int { audioSettingsCommand=0x20001,contextHelpCommand,manualCommand,historyCommand,
                     updatesCommand,projectCommand,contactCommand,donateCommand,allNotesOffCommand,
                     panicCommand,gsResetCommand,gmResetCommand,restartEngineCommand,activityDisplayCommand,
-                    readActivityCommand,showControlsCommand,hideControlsCommand,dawPresetsCommand,aboutCommand };
+                    readActivityCommand,showControlsCommand,hideControlsCommand,dawPresetsCommand,musicalKeyboardCommand,aboutCommand };
 constexpr const char* virtualPortName="Sound Canvas Bridge";
 constexpr const char* donateUrl="https://onj.me/donate";
 constexpr const char* contactUrl="https://onj.me/contact";
@@ -33,8 +33,8 @@ constexpr const char* projectUrl="https://github.com/OnjLouis/sound-canvas-bridg
 constexpr int actionModifiers=juce::ModifierKeys::commandModifier;
 #ifdef _WIN32
 scbridge::WindowsMenuBar::Section windowsMidiMenu() {
-    return {"&MIDI",{allNotesOffCommand,panicCommand,0,gsResetCommand,gmResetCommand,restartEngineCommand},
-        {"&All Notes Off","&Panic: All Sounds Off",{},"&GS Reset...","G&M Reset...","&Restart Engine with Defaults..."}};
+    return {"&MIDI",{musicalKeyboardCommand,0,allNotesOffCommand,panicCommand,0,gsResetCommand,gmResetCommand,restartEngineCommand},
+        {"Musical &Keyboard",{},"&All Notes Off","&Panic: All Sounds Off",{},"&GS Reset...","G&M Reset...","&Restart Engine with Defaults..."}};
 }
 #endif
 
@@ -48,7 +48,11 @@ bool commandInfo(juce::CommandID command,juce::ApplicationCommandInfo& result) {
             result.setInfo("Help for Focused Control","Read the focused control's help","Help",0);
             result.addDefaultKeypress(juce::KeyPress::F1Key,0);break;
         case updatesCommand:
+#ifdef SCBRIDGE_WINDOWS7
+            result.setInfo("Check for Updates...","Check for a Windows 7 portable release","Help",0);
+#else
             result.setInfo("Check for Updates...","Check the signed release channel","Help",0);
+#endif
             result.addDefaultKeypress(juce::KeyPress::F1Key,juce::ModifierKeys::shiftModifier);break;
         case projectCommand:
             result.setInfo("Product Page","Open the Sound Canvas Bridge GitHub page","Help",0);
@@ -57,6 +61,9 @@ bool commandInfo(juce::CommandID command,juce::ApplicationCommandInfo& result) {
         case historyCommand: result.setInfo("Version History...","Read the bundled version history","Help",0);break;
         case donateCommand: result.setInfo("Donate","Open the donation page","Help",0);break;
         case contactCommand: result.setInfo("Contact","Open the contact page","Help",0);break;
+        case musicalKeyboardCommand:
+            result.setInfo("Musical Keyboard","Toggle computer-keyboard playback","MIDI",0);
+            result.addDefaultKeypress('k',actionModifiers);break;
         case allNotesOffCommand:
             result.setInfo("All Notes Off","Release notes on all 16 MIDI channels; sustain may continue","MIDI",0);
             result.addDefaultKeypress(juce::KeyPress::F9Key,0);
@@ -407,15 +414,27 @@ public:
         setUsingNativeTitleBar(true);
         text.setMultiLine(true);text.setReadOnly(true);text.setName(title+" help");text.setTitle(text.getName());
         text.setTabKeyUsedAsCharacter(false);
-        text.setText(help.replace(". ",".\n\n"),false);text.setCaretPosition(0);text.setExplicitFocusOrder(1);
+        text.setHelpText({});text.setTooltip({});
+        text.setText(help.replace(". ",".\n\n")+"\n\nUse arrows to review, Escape to close.",false);
+        text.setCaretPosition(0);text.setExplicitFocusOrder(1);
         text.onEscapeKey=[this] { closeButtonPressed(); };
         close.setButtonText("Close");close.setName("Close help");close.setExplicitFocusOrder(2);
-        close.setHelpText("Close help and return to the previous control.");close.onClick=[this] { closeButtonPressed(); };
+        close.onClick=[this] { closeButtonPressed(); };
         content.addAndMakeVisible(text);content.addAndMakeVisible(close);
         content.setSize(620,320);text.setBounds(12,12,596,250);close.setBounds(488,274,120,32);
         setContentNonOwned(&content,true);centreWithSize(getWidth(),getHeight());setVisible(true);toFront(true);
+#ifdef _WIN32
+        focusTextIfNeeded();
+#else
         scheduleInitialFocus(content);
+#endif
     }
+#ifdef _WIN32
+    void activeWindowStatusChanged() override {
+        DocumentWindow::activeWindowStatusChanged();
+        focusTextIfNeeded();
+    }
+#endif
     void closeButtonPressed() override {
         setVisible(false);
         if(restore && restore->isShowing()) {
@@ -430,6 +449,12 @@ public:
         return DocumentWindow::keyPressed(key);
     }
 private:
+#ifdef _WIN32
+    void focusTextIfNeeded() {
+        // Let the native focus event announce the editor once.
+        if(isActiveWindow() && text.isShowing() && !content.hasKeyboardFocus(true)) text.grabKeyboardFocus();
+    }
+#endif
     juce::Component content;
     scbridge::ReviewTextEditor text;
     juce::TextButton close;
@@ -577,14 +602,15 @@ public:
 
 class MainContent final : public juce::Component {
 public:
-    MainContent(juce::AudioProcessor& processor,scbridge::MidiActivity& activity,bool visible,std::function<void(int)> applyMap={})
+    MainContent(juce::AudioProcessor& processor,scbridge::MidiActivity& activity,bool visible,
+                std::function<void(int)> applyMap,std::function<void(juce::MidiMessage)> playNote)
 #if JUCE_MAJOR_VERSION >= 8
         :editor(processor.createEditorAndMakeActive()),display(activity) {
 #else
         :editor(processor.createEditorIfNeeded()),display(activity) {
 #endif
         setName("Sound Canvas controls");
-        if(applyMap) scbridge::configureStandaloneEditor(*editor,std::move(applyMap));
+        scbridge::configureStandaloneEditor(*editor,std::move(applyMap),std::move(playNote));
         setFocusContainerType(juce::Component::FocusContainerType::keyboardFocusContainer);
         addAndMakeVisible(*editor);addChildComponent(display);showActivity(visible);
     }
@@ -594,6 +620,7 @@ public:
     void showActivity(bool visible) {
         display.setVisible(visible);setSize(editor->getWidth()+(visible ? 212 : 0),editor->getHeight());
     }
+    void toggleMusicalKeyboard() { scbridge::toggleStandaloneMusicalKeyboard(*editor); }
     void resized() override {
         editor->setTopLeftPosition(0,0);
         display.setBounds(editor->getWidth()+12,12,188,getHeight()-24);
@@ -618,16 +645,20 @@ static void fitLegacyStandaloneToDisplay() {
 
 class MainWindow final : public juce::DocumentWindow {
 public:
-    MainWindow(juce::AudioProcessor& processor,scbridge::MidiActivity& activity,bool showActivity,bool initiallyVisible=true,std::function<void(int)> mapAll={})
-        :DocumentWindow("Sound Canvas Bridge",juce::Colours::black,allButtons),applyMap(std::move(mapAll)) {
+    MainWindow(juce::AudioProcessor& processor,scbridge::MidiActivity& activity,bool showActivity,bool initiallyVisible=true,
+               std::function<void(int)> mapAll={},std::function<void(juce::MidiMessage)> playNote={})
+        :DocumentWindow("Sound Canvas Bridge",juce::Colours::black,allButtons),applyMap(std::move(mapAll)),playTypingNote(std::move(playNote)) {
         setUsingNativeTitleBar(true);setEditor(processor,activity,showActivity);
         centreWithSize(getWidth(),getHeight());setVisible(initiallyVisible);
     }
     void setEditor(juce::AudioProcessor& processor,scbridge::MidiActivity& activity,bool visible) {
-        setContentOwned(new MainContent(processor,activity,visible,applyMap),true);
+        setContentOwned(new MainContent(processor,activity,visible,applyMap,playTypingNote),true);
         scheduleInitialFocus(*getContentComponent());
     }
     void showActivity(bool visible) { if(auto* content=dynamic_cast<MainContent*>(getContentComponent())) content->showActivity(visible); }
+    void toggleMusicalKeyboard() {
+        if(auto* content=dynamic_cast<MainContent*>(getContentComponent())) content->toggleMusicalKeyboard();
+    }
 #ifdef _WIN32
     void showPreferences(SettingsPanel& panel) {
         if(!preferences || !preferences->isVisible()) {
@@ -673,6 +704,7 @@ public:
     void closeButtonPressed() override { if(onClose) onClose();else setVisible(false); }
 private:
     std::function<void(int)> applyMap;
+    std::function<void(juce::MidiMessage)> playTypingNote;
     juce::Component* focusRoot() {
 #ifdef _WIN32
         if(preferencesVisible()) return preferences;
@@ -772,7 +804,7 @@ public:
             for(const auto& message:messages)
                 if(message.size) sendMidi(juce::MidiMessage(message.bytes.data(),static_cast<int>(message.size)));
             juce::Logger::writeToLog("Sound map applied to all parts: "+juce::String(map));
-        });
+        },[this](juce::MidiMessage note) { sendMidi(std::move(note)); });
         window->onClose=[this] {
 #ifdef _WIN32
             systemRequestedQuit();
@@ -856,6 +888,9 @@ public:
             case projectCommand: openLink(projectUrl);return true;
             case donateCommand: openLink(donateUrl);return true;
             case contactCommand: openLink(contactUrl);return true;
+            case musicalKeyboardCommand:
+                if(window && window->isShowing()) window->toggleMusicalKeyboard();
+                return true;
             case allNotesOffCommand: silence(false);return true;
             case panicCommand: silence(true);return true;
             case gsResetCommand: case gmResetCommand: case restartEngineCommand: confirmReset(info.commandID);return true;
@@ -889,6 +924,7 @@ private:
         juce::PopupMenu menu;
         if(index==0) menu.addCommandItem(&commands,audioSettingsCommand);
         else if(index==1) {
+            menu.addCommandItem(&commands,musicalKeyboardCommand);menu.addSeparator();
             menu.addCommandItem(&commands,allNotesOffCommand);menu.addCommandItem(&commands,panicCommand);menu.addSeparator();
             for(int command:{gsResetCommand,gmResetCommand,restartEngineCommand}) menu.addCommandItem(&commands,command);
         } else if(index==2) {

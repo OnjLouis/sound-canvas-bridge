@@ -27,16 +27,29 @@ they share the same plug-in ID.</li>
 F1 opens focused-control help, F9 sends All Notes Off, and Control+Q quits.
 Escape closes help, preferences or the browser. Use the application menu for
 reset, activity and tray commands.</p>
-<p>On Current sound and Control page, arrow keys step, Page Up and Page Down
+<p>Musical Keyboard (Control+K) auditions the selected part in the standalone.
+A S D F G H J K L, semicolon and apostrophe play white notes; W E T Y U O P play sharps. Z/X change octave,
+and C/V change velocity. The Octave and Velocity sliders appear only with
+the keyboard. All auditions the last numbered part. The keyboard
+pauses and releases notes during direct value entry and preset search. Escape
+closes the keyboard. VST3 uses the host's MIDI keyboard.</p>
+<p>Part shows each numbered part and its current sound, for example
+<strong>1: Piano 1</strong>. Moving between parts doesn't load or reset sounds.
+All remains available in the standalone for changing the Sound Map across all parts.</p>
+<p>On Part, Current sound and Control page, arrow keys step, Page Up and Page Down
 move ten entries, and Home and End go to the limits. Press Enter on Current
 sound to open the searchable preset list. Slider values can be stepped or
 typed with Enter. A Windows 7 screen reader may say "alert" after an announced
 change; the bridge does not use its own speech synthesiser for those changes.</p>
 <h2>Updates and presets</h2>
-<p>This legacy edition has no automatic updater. Check the
-<a href="https://github.com/OnjLouis/sound-canvas-bridge/releases">GitHub releases</a>
-for Windows 7 ZIPs. Close the bridge and any host using it before replacing
-the program files. Keep your user settings and original engine separate.</p>
+<p>Shift+F1 checks for a Windows 7 release matching this build's architecture.
+Set the automatic check interval under Preferences, General. A check can open the
+release page, but never downloads or replaces program files. If Windows 7 cannot
+connect over HTTPS, use the
+<a href="https://github.com/OnjLouis/sound-canvas-bridge/releases">GitHub releases page</a>
+in a supported browser. Check the published SHA-256 before extracting the ZIP.
+Close the bridge and any host using it before replacing the full Application
+folder and VST3 bundle. Keep your user settings and original engine separate.</p>
 <p>Grouped VST3 presets are included. The
 <a href="https://onj.me/nks">Sound Canvas NKS pack</a> is separate and requires a
 compatible Komplete Kontrol installation.</p>

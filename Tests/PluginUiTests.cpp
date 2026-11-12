@@ -6,6 +6,7 @@
 #include "../Source/Controls.h"
 #include "KeyboardChoiceFixture.h"
 #ifdef _WIN32
+#include "../Source/EngineLocation.h"
 #include <windows.h>
 #endif
 
@@ -21,8 +22,44 @@ struct ProgramNotification final : juce::AudioProcessorListener {
     bool programChanged=false;
 };
 
+#ifdef _WIN32
+static bool testLivePartNames(const char* mockCore) {
+    const auto path=juce::File(juce::String(mockCore));
+    const auto core=scbridge::performanceFile().getSiblingFile("SCCore.dll");
+    juce::String error;
+    if(core.getParentDirectory().createDirectory().failed() || !path.copyFileTo(core) ||
+       !scbridge::EngineLocation().save(core,error)) return false;
+    std::unique_ptr<juce::AudioProcessor> processor(createPluginFilter());
+    std::unique_ptr<juce::AudioProcessorEditor> editor(processor->createEditorIfNeeded());
+    auto* parts=dynamic_cast<juce::ComboBox*>(editor->findChildWithID("part"));
+    if(!parts) return false;
+    processor->setNonRealtime(true);
+    processor->prepareToPlay(48000,128);
+    juce::AudioBuffer<float> audio(2,128);
+    juce::MidiBuffer midi;
+    midi.addEvent(juce::MidiMessage::controllerEvent(2,0,1),0);
+    midi.addEvent(juce::MidiMessage::programChange(2,0),1);
+    midi.addEvent(juce::MidiMessage::programChange(10,25),2);
+    for(int block=0;block<12;++block) {
+        audio.clear();processor->processBlock(audio,midi);midi.clear();
+    }
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(700);
+    const bool passed=parts->getText()=="1: Piano 1" && parts->getItemText(1)=="2: UprightPiano" &&
+        parts->getItemText(9)=="10: TR-808" && parts->getProperties()["lastKeyboardAnnouncement"].isVoid();
+    processor->releaseResources();
+    return passed;
+}
+#endif
+
 int main(int argc,char** argv) {
     juce::ScopedJuceInitialiser_GUI gui;
+#ifdef _WIN32
+    if(argc==3 && juce::String(argv[1])=="--part-midi") {
+        const bool passed=testLivePartNames(argv[2]);
+        std::cout<<(passed ? "PASS" : "FAIL")<<": incoming MIDI updates the names of unselected parts without announcing them\n";
+        return passed ? 0 : 1;
+    }
+#endif
     bool choicesPassed=true;
     keyboardChoiceFixture::run([&](bool value,const char* message) {
         if(!value) {std::cerr<<"FAIL: "<<message<<'\n';choicesPassed=false;}
@@ -91,10 +128,28 @@ int main(int argc,char** argv) {
        !processor->getProgramName(0).contains("SC-8820") || !processor->getProgramName(0).contains("Piano 1")) {
         std::cerr<<"FAIL: native program catalogue names/count\n";return 1;
     }
+    auto* parts=dynamic_cast<juce::ComboBox*>(editor->findChildWithID("part"));
+    if(!parts || parts->getNumItems()!=16 || parts->getItemText(0)!="1: Piano 1" ||
+       parts->getItemText(9)!="10: STANDARD 1") {
+        std::cerr<<"FAIL: plug-in Part selector must expose the sixteen named sounds\n";return 1;
+    }
+    auto* partValue=parts->getAccessibilityHandler()->getValueInterface();
+    parts->keyPressed(juce::KeyPress(juce::KeyPress::downKey));
+    if(!partValue || partValue->getCurrentValueAsString()!="2: Piano 1" ||
+       parts->getProperties()["lastKeyboardAnnouncement"].toString()!="Part, 2: Piano 1" ||
+       std::abs(processor->getParameters()[0]->getValue()-1.0f/15.0f)>0.000001f) {
+        std::cerr<<"FAIL: selecting a named part must announce it and preserve automation numbering\n";return 1;
+    }
+    parts->keyPressed(juce::KeyPress(juce::KeyPress::homeKey));
     std::vector<float> untouched;
     for(int i=4;i<93;++i) untouched.push_back(processor->getParameters()[i]->getValue());
     processor->setCurrentProgram(1);
     if(processor->getCurrentProgram()!=1) { std::cerr<<"FAIL: factory program recall before audio starts\n";return 1; }
+    juce::MessageManager::getInstance()->runDispatchLoopUntil(650);
+    if(parts->getText()!="1: UprightPiano" || parts->getItemText(1)!="2: Piano 1" ||
+       parts->getProperties()["lastKeyboardAnnouncement"].toString()!="Part, 1: Piano 1") {
+        std::cerr<<"FAIL: a sound change must refresh only its part without requesting an announcement\n";return 1;
+    }
     for(int i=4;i<93;++i) if(processor->getParameters()[i]->getValue()!=untouched[static_cast<size_t>(i-4)]) {
         std::cerr<<"FAIL: sound selection changed mixer/effects/routing\n";return 1;
     }

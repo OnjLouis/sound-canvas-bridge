@@ -8,8 +8,8 @@
 #pragma pop_macro("DEFINE_GUID")
 
 namespace scbridge {
-// Win7 predates UIA notification events. An MSAA alert lets the screen reader
-// announce a user-initiated change without moving focus or synthesising speech.
+// Windows 7 predates UIA notifications. Use an MSAA alert without moving
+// focus or invoking JUCE's Windows speech synthesiser.
 class LegacyWindowsAnnouncement {
 public:
     ~LegacyWindowsAnnouncement() { reset(); }

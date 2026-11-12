@@ -5,6 +5,7 @@
 #include <set>
 #include "AudioStartupFixture.h"
 #include "PreferencesStartupFixture.h"
+#include "MusicalKeyboardFixture.h"
 
 int main(int argc,char** argv) {
     juce::ScopedJuceInitialiser_GUI gui;
@@ -42,6 +43,7 @@ int main(int argc,char** argv) {
 #endif
         audioStartupFixture::run(require);
         preferencesStartupFixture::run(require);
+        musicalKeyboardFixture::run(require);
         {
             juce::AudioDeviceManager devices;
             scbridge::AppPreferences preferences;
@@ -108,12 +110,16 @@ int main(int argc,char** argv) {
         std::unique_ptr<juce::AudioProcessorEditor> editor(processor->createEditorAndMakeActive());
         juce::DocumentWindow host("Map keyboard test",juce::Colours::black,juce::DocumentWindow::closeButton,true);
         host.setContentNonOwned(editor.get(),true);host.setVisible(true);host.toFront(true);
-        require(dynamic_cast<juce::Slider*>(editor->findChildWithID("part"))!=nullptr,"Ordinary plug-in editor must retain numbered Part slider");
+        auto* pluginParts=dynamic_cast<juce::ComboBox*>(editor->findChildWithID("part"));
+        require(!editor->findChildWithID("musicalKeyboard"),"The plug-in editor must not include Musical Keyboard");
+        require(pluginParts && pluginParts->getNumItems()==16,"Ordinary plug-in editor must offer only the sixteen named parts");
         std::vector<int> requests;
         scbridge::configureStandaloneEditor(*editor,[&](int map){requests.push_back(map);});
         auto* part=dynamic_cast<juce::ComboBox*>(editor->findChildWithID("part"));
         auto* map=dynamic_cast<juce::ComboBox*>(editor->findChildWithID("map"));
         require(part && map && part->getNumItems()==17,"Standalone must offer All and sixteen parts");
+        require(part->getItemText(1)=="1: Piano 1" && part->getItemText(10)=="10: STANDARD 1",
+                "Standalone must expose both program and drum kit names");
         require(part->getAccessibilityHandler()->getHelp().isEmpty(),"Part must not automatically announce instructions");
         require(part->getProperties()["scbridgeContextHelp"].toString().contains("All"),"Part instructions must remain available to F1");
         require(scbridge::contextHelp(*part).contains("All"),"F1 help lookup must resolve the quiet Part selector's full explanation");

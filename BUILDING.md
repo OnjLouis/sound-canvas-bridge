@@ -78,8 +78,10 @@ cmake --build build-win7 --parallel 4 --target SoundCanvasStandaloneBundle Sound
 Use absolute dependency paths if configuring from another working directory.
 The portable Application and VST3 outputs are in the same relative locations
 as the modern build. The helper and original engine must match their
-architecture. Neither the installer/updater nor the preview MIDI Services
-runtime is used. Legacy binaries and corresponding JUCE 7 source are under
+architecture. The portable bundle includes a check-only helper for matching
+`windows7-vVERSION` releases with an architecture-specific ZIP and published
+checksums. The modern installer/updater and preview MIDI Services runtime are
+not used. Legacy binaries and corresponding JUCE 7 source are under
 GPLv3; the original bridge source is also available under MIT. Test on the
 target version of Windows before distributing a build for that architecture.
 

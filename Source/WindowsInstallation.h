@@ -31,7 +31,11 @@ public:
         if(isInstalled(app)) return app.existsAsFile() ? juce::Result::ok() : juce::Result::fail("The installed application is missing.");
         const auto source=app.getParentDirectory();
         const juce::StringArray optional{"SoundCanvasMidiHost.exe","Windows.Devices.Midi2.dll","SoundCanvasMaintenance.exe","WindowsUpdateKey.xml",
-            "SoundCanvasEngineDownload.exe","Unshield Licence.txt","Zlib Licence.txt"};
+            "SoundCanvasEngineDownload.exe","Unshield Licence.txt","Zlib Licence.txt"
+#ifdef SCBRIDGE_WINDOWS7
+            ,"SoundCanvasUpdateCheck.exe"
+#endif
+        };
         if(source.getChildFile("SoundCanvasEngineDownload.exe").existsAsFile() &&
            (!source.getChildFile("Unshield Licence.txt").existsAsFile() || !source.getChildFile("Zlib Licence.txt").existsAsFile()))
             return juce::Result::fail("The engine download helper's licence files are missing.");

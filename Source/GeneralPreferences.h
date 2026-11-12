@@ -20,9 +20,6 @@ public:
         frequency.setSelectedId(static_cast<int>(preferences.frequency()),juce::dontSendNotification);
         describe(frequency,"Check for updates","Never disables automatic checks. At startup checks on each launch. Hourly and Daily also check on launch when overdue. Updates never install automatically.",1);
         frequency.setComponentID("updateFrequency");
-#ifdef SCBRIDGE_WINDOWS7
-        frequency.setEnabled(false);
-#endif
         frequency.onChange=[this] {
             if(!preferences.setFrequency(static_cast<CheckFrequency>(frequency.getSelectedId()))) { showError("Could not save the update frequency.");return; }
             updates.preferencesChanged();

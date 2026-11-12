@@ -23,11 +23,11 @@ NKS files or previews. Version 1.3 improves installation and discovery, without 
 or the NKS catalogue. Version 1.2 added Windows x64 and All-parts sound-map support.
 Each platform has its own installer and update channel.
 
-**[Windows installer and release notes](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/windows-v1.4.3)**
+**[Windows installer and release notes](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/windows-v1.4.4)**
 
 **[Windows 7 SP1 portable edition](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/windows7-v1.4.3)** ([setup guide](Resources/Windows7Manual.html))
 
-**[Mac installer and release notes](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/v1.4.3)**
+**[Mac installer and release notes](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/v1.4.4)**
 
 [All releases](https://github.com/OnjLouis/sound-canvas-bridge/releases)
 
@@ -132,7 +132,10 @@ resolved, not rewired; edited and unrelated banks remain untouched.
 The current-name selector above the controls loads adjacent sounds with Up/Down
 and announces their names. Enter opens the searchable browser. Browser rows use
 short names; F1 opens the full address details, and Escape returns to the same row.
-Choice controls, including Current sound and Control page, support Home/End for
+Part lists all sixteen numbered parts with their current program or drum kit.
+Selecting a part changes what you edit without loading another sound. The
+standalone also offers All for applying a Sound Map to every part.
+Choice controls, including Part, Current sound and Control page, support Home/End for
 the first/last entry and Page Up/Page Down for ten-entry jumps without wrapping.
 The VST3 retains one native program because JUCE's root factory list can otherwise
 reinterpret per-channel MIDI program changes as global factory selections.
@@ -145,6 +148,8 @@ Windows updates use a separate release family and pinned RSA signatures. These
 are not Microsoft-trusted Authenticode signatures. The development-preview
 Windows MIDI Services virtual-port runtime is not distributed; existing physical
 or loopback MIDI inputs remain usable, without modifying their drivers/services.
+The Windows 7 edition built from this source can check its own portable release
+channel and open the matching release page. ZIP installation remains manual.
 
 Very low buffer settings depend on the computer and host; start at 128 and increase
 if needed. The experimental 32-sample setting can lose samples under load; dense
@@ -168,7 +173,13 @@ scenes retain the older encoding; custom assignments use scene version 3 and
 require the updated bridge to recall them correctly.
 Scenes with custom default maps use version 4 and require bridge 1.4.2 or later;
 all older scene versions remain readable. Existing NKS presets need no changes.
-The standalone receives MIDI, but is not a MIDI-file browser or onscreen keyboard.
+The standalone receives MIDI and can audition the selected part with **Musical
+Keyboard** (Command+K on Mac, Control+K on Windows). Play white notes with
+A S D F G H J K L, semicolon and apostrophe, and sharps with W E T Y U O P. Z/X change octave and C/V change
+velocity. The Octave and Velocity sliders appear while the keyboard is active.
+When Part is All, the keyboard plays the last numbered part. Direct
+value entry and preset search temporarily hide the keyboard and release its
+notes. Escape closes the keyboard. The plug-ins use the host's MIDI keyboard.
 
 Update cleanup never forces a busy disk image to unmount. If macOS keeps a
 cancelled image busy beyond the bounded retries, the temporary download is

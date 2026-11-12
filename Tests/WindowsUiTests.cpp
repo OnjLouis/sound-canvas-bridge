@@ -1,4 +1,11 @@
 #define SCBRIDGE_STANDALONE_TEST 1
+#ifndef SCBRIDGE_WINDOWS7
+#include <windows.h>
+#include <objbase.h>
+#include <UIAutomation.h>
+#include <wrl.h>
+#include <thread>
+#endif
 #include "../Source/Standalone.cpp"
 #include "../Source/ProgramBrowser.h"
 #include <iostream>
@@ -6,9 +13,10 @@
 #include "AudioStartupFixture.h"
 #include "PreferencesStartupFixture.h"
 #include "EngineDownloadFixture.h"
+#include "MusicalKeyboardFixture.h"
 
-#ifdef SCBRIDGE_WINDOWS7
 namespace {
+#ifdef SCBRIDGE_WINDOWS7
 juce::String legacyAlertText;
 void CALLBACK readLegacyAlert(HWINEVENTHOOK,DWORD,HWND hwnd,LONG object,LONG child,DWORD,DWORD) {
     IAccessible* accessible=nullptr;
@@ -25,8 +33,67 @@ void CALLBACK readLegacyAlert(HWINEVENTHOOK,DWORD,HWND hwnd,LONG object,LONG chi
     }
     VariantClear(&childId);
 }
-}
+#else
+using namespace Microsoft::WRL;
+class KeyboardNotificationReceiver final : public RuntimeClass<RuntimeClassFlags<ClassicCom>,
+    IUIAutomationNotificationEventHandler,FtmBase> {
+public:
+    HRESULT STDMETHODCALLTYPE HandleNotificationEvent(IUIAutomationElement* sender,NotificationKind kind,
+        NotificationProcessing,BSTR message,BSTR activity) override {
+        if(sender && kind==NotificationKind_Other && juce::String(activity)=="SoundCanvas.MusicalKeyboard") {
+            UIA_HWND handle=nullptr;
+            BSTR framework=nullptr;
+            DWORD process=0;
+            const bool fromBridge=SUCCEEDED(sender->get_CurrentNativeWindowHandle(&handle)) && handle &&
+                GetWindowThreadProcessId(static_cast<HWND>(handle),&process) && process==GetCurrentProcessId() &&
+                SUCCEEDED(sender->get_CurrentFrameworkId(&framework)) && juce::String(framework)=="JUCE";
+            SysFreeString(framework);
+            if(!fromBridge) return S_OK;
+            const juce::ScopedLock lock(mutex);
+            last=juce::String(message);
+        }
+        return S_OK;
+    }
+    bool received(const juce::String& text) const {
+        const juce::ScopedLock lock(mutex);
+        return last==text;
+    }
+private:
+    mutable juce::CriticalSection mutex;
+    juce::String last;
+};
+
+class KeyboardNotificationClient {
+public:
+    KeyboardNotificationClient(): worker([this] { listen(); }) {}
+    ~KeyboardNotificationClient() { stop.signal();worker.join(); }
+    bool waitForSubscription() { return ready.wait(3000) && subscribed; }
+    bool received(const juce::String& text) const { return receiver && receiver->received(text); }
+private:
+    void listen() {
+        if(FAILED(CoInitializeEx(nullptr,COINIT_MULTITHREADED))) { ready.signal();return; }
+        {
+            ComPtr<IUIAutomation5> uia;
+            ComPtr<IUIAutomationElement> desktop;
+            receiver=Make<KeyboardNotificationReceiver>();
+            subscribed=receiver && SUCCEEDED(CoCreateInstance(__uuidof(CUIAutomation8),nullptr,CLSCTX_INPROC_SERVER,
+                IID_PPV_ARGS(uia.GetAddressOf()))) && SUCCEEDED(uia->GetRootElement(desktop.GetAddressOf())) &&
+                SUCCEEDED(uia->AddNotificationEventHandler(desktop.Get(),TreeScope_Subtree,nullptr,receiver.Get()));
+            ready.signal();
+            if(subscribed) {
+                stop.wait();
+                uia->RemoveNotificationEventHandler(desktop.Get(),receiver.Get());
+            }
+        }
+        CoUninitialize();
+    }
+    ComPtr<KeyboardNotificationReceiver> receiver;
+    juce::WaitableEvent ready,stop;
+    bool subscribed=false;
+    std::thread worker;
+};
 #endif
+}
 
 static int runUiChecks(const juce::StringArray& args) {
 #ifdef SCBRIDGE_WINDOWS7
@@ -37,6 +104,21 @@ static int runUiChecks(const juce::StringArray& args) {
     auto check=[&](bool success,const char* message) {
         if(!success) { std::cerr<<"FAIL: "<<message<<'\n';++failures; }
     };
+    {
+#ifdef SCBRIDGE_WINDOWS7
+        const auto alertHook=SetWinEventHook(EVENT_SYSTEM_ALERT,EVENT_SYSTEM_ALERT,nullptr,readLegacyAlert,
+                                            GetCurrentProcessId(),GetCurrentThreadId(),WINEVENT_OUTOFCONTEXT);
+        check(alertHook!=nullptr,"Subscribe to native musical keyboard accessibility alerts");
+        musicalKeyboardFixture::run(check,[](const juce::String& text) { return legacyAlertText==text; });
+        if(alertHook) UnhookWinEvent(alertHook);
+#else
+        KeyboardNotificationClient client;
+        const bool subscribed=client.waitForSubscription();
+        check(subscribed,"Subscribe to Windows UI Automation notifications");
+        if(subscribed)
+            musicalKeyboardFixture::run(check,[&](const juce::String& text) { return client.received(text); });
+#endif
+    }
     {
         scbridge::AccessibleToggleButton checkbox("Test checkbox");
         juce::Component host;
@@ -88,6 +170,31 @@ static int runUiChecks(const juce::StringArray& args) {
     check(focused && focused->getName()=="Control page","Initial focus must land on Control page, not a layout wrapper");
     if(focused) std::cout<<"Initial focused component: "<<focused->getName()<<'\n';
     auto* editor=processor->getActiveEditor();
+    if(focused) {
+        ControlHelpWindow help("Test","The important help comes first. Another line.",focused);
+        auto* content=help.getContentComponent();
+        auto* text=dynamic_cast<scbridge::ReviewTextEditor*>(content->getChildComponent(0));
+        check(text && text->getHelpText().isEmpty() && text->getTooltip().isEmpty(),
+              "F1 must not expose a separate navigation description");
+        if(text) {
+            const auto deadline=juce::Time::getMillisecondCounterHiRes()+1000;
+            while(!text->hasKeyboardFocus(false) && juce::Time::getMillisecondCounterHiRes()<deadline)
+                juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+            check(text->getText()=="The important help comes first.\n\nAnother line.\n\nUse arrows to review, Escape to close.",
+                  "F1 presents contextual help before the short navigation hint");
+            check(text->getCaretPosition()==0 && text->hasKeyboardFocus(false),
+                  "F1 opens at the start of its help text");
+            help.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::downKey));
+            check(text->getCaretPosition()>0,"F1 help stays reviewable with arrows");
+        }
+        help.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::escapeKey));
+        const auto closeDeadline=juce::Time::getMillisecondCounterHiRes()+1000;
+        while((help.isShowing() || !focused->hasKeyboardFocus(false)) &&
+              juce::Time::getMillisecondCounterHiRes()<closeDeadline)
+            juce::MessageManager::getInstance()->runDispatchLoopUntil(20);
+        check(!help.isShowing() && focused->hasKeyboardFocus(false),
+              "Escape closes F1 help and returns to the original control");
+    }
     auto* preset=dynamic_cast<juce::ComboBox*>(editor->findChildWithID("currentSound"));
     check(preset!=nullptr,"Standalone must expose its current preset selector");
     if(preset) {
@@ -163,9 +270,9 @@ static int runUiChecks(const juce::StringArray& args) {
         main.getPeer()->handleKeyPress(juce::KeyPress(juce::KeyPress::homeKey));
         check(controlPage->getSelectedItemIndex()==0 && processor->getCurrentProgram()==sound,"Standalone page navigation must preserve the sound");
     }
-    for(auto* child:editor->getChildren()) if(child->getComponentID()=="part" || child->getComponentID()=="program") {
+    for(auto* child:editor->getChildren()) if(child->getComponentID()=="program") {
         auto* value=child->getAccessibilityHandler()->getValueInterface();
-        check(value && value->getCurrentValue()==1,"Accessible Part and Program must use the displayed one-based value");
+        check(value && value->getCurrentValue()==1,"Accessible Program must use the displayed one-based value");
         if(value) {
             value->setValue(2);
             check(value->getCurrentValue()==2,"Accessible numeric setters must round-trip the displayed value");
@@ -292,6 +399,8 @@ static int runUiChecks(const juce::StringArray& args) {
     auto* soundMap=dynamic_cast<juce::ComboBox*>(editor->findChildWithID("map"));
     check(partScope && partScope->getNumItems()==17 && soundMap,"Standalone Part must offer All and all sixteen numbered parts");
     if(partScope && soundMap) {
+        check(partScope->getItemText(1)=="1: Piano 1" && partScope->getItemText(10)=="10: STANDARD 1",
+            "Standalone Part must name both melodic and rhythm sounds");
         check(partScope->getAccessibilityHandler()->getHelp().isEmpty(),"Part must not automatically announce instructions");
         check(partScope->getProperties()["scbridgeContextHelp"].toString().contains("All"),"Part instructions must remain available to F1");
         check(scbridge::contextHelp(*partScope).contains("All"),"F1 help lookup must resolve the quiet Part selector's full explanation");

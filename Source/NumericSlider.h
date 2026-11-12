@@ -75,6 +75,8 @@ public:
         entry.setAccessible(false); entry.setVisible(false); setAccessible(false);
     }
     std::function<void()> onStepStart, onStepEnd;
+    std::function<void()> onEntryChanged;
+    bool isEnteringValue() const { return editing; }
     void configureValueField(int width) {
         setTextBoxStyle(juce::Slider::TextBoxRight,true,width,28);
         hideReadOnlyLabels();
@@ -95,6 +97,7 @@ public:
             entry.setHelpText("Up and Down change one step. Page Up and Page Down change ten. Enter confirms; Escape cancels.");
             entry.setDescription(entry.getName());
             entry.setText(initialText,false); editing = true;
+            if (onEntryChanged) onEntryChanged();
             entry.setVisible(true); entry.toFront(true); entry.grabKeyboardFocus(); entry.selectAll();
             if (auto* handler = entry.getAccessibilityHandler()) handler->grabFocus();
             return true;
@@ -181,6 +184,7 @@ private:
             grabKeyboardFocus();
             if (auto* handler = getAccessibilityHandler()) handler->grabFocus();
         }
+        if (onEntryChanged) onEntryChanged();
     }
     Entry entry;
 #ifdef _WIN32

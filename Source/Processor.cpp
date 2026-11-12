@@ -7,10 +7,12 @@
 #include "TransientTooltip.h"
 #include "NumericSlider.h"
 #include "StandaloneEditor.h"
+#include "MusicalKeyboardStrip.h"
 #include "ControlHelp.h"
 #include "ProgramBrowser.h"
 #include "AccessibleToggleButton.h"
 #include "ProgramSelection.h"
+#include <optional>
 #ifdef _WIN32
 #include "WindowsIpc.h"
 #else
@@ -89,15 +91,26 @@ juce::String controlHelp(unsigned index) {
     return help;
 }
 
+struct PartTone {
+    int map=4,bank=0,program=0;
+    bool drums=false;
+    bool operator==(const PartTone& other) const {
+        return map==other.map && bank==other.bank && program==other.program && drums==other.drums;
+    }
+};
+using PartTones=std::array<PartTone,16>;
+constexpr int allPartsId=1,firstPartId=2;
+
 class BridgeEditor final : public juce::AudioProcessorEditor, private juce::Timer, private juce::KeyListener {
 public:
     BridgeEditor(juce::AudioProcessor& p, juce::AudioProcessorValueTreeState& state,
                  std::function<juce::String()> statusText, std::function<int()> latencyValue,
                  std::function<void(int)> changeLatency, std::function<bool()> advancedValue,
                  std::function<int()> programValue, std::function<bool(int)> selectProgram,
-                 std::function<bool()> rhythmValue)
+                 std::function<bool()> rhythmValue, std::function<PartTones()> partTones)
         : AudioProcessorEditor(p), parameters(state), readStatus(std::move(statusText)), readLatency(std::move(latencyValue)),
-          readAdvanced(std::move(advancedValue)), readProgram(std::move(programValue)), readRhythm(std::move(rhythmValue)) {
+          readAdvanced(std::move(advancedValue)), readProgram(std::move(programValue)), readRhythm(std::move(rhythmValue)),
+          readPartTones(std::move(partTones)) {
         setName("Sound Canvas controls"); setTitle("Sound Canvas controls");
         tooltips.setComponentID("controlHelp");
         setFocusContainerType(juce::Component::FocusContainerType::focusContainer);
@@ -115,7 +128,12 @@ public:
             control.setWantsKeyboardFocus(true); control.setExplicitFocusOrder(static_cast<int>(i + 1));
             labels[i].setText(names[i], juce::dontSendNotification); labels[i].setAccessible(false);
             addAndMakeVisible(labels[i]); addAndMakeVisible(control);
-            if(isSwitch) {
+            if(i==0) {
+                partScope.getProperties().set(scbridge::explicitHelpProperty,help);
+                partScope.setHelpText({});
+                for(int part=0;part<16;++part) partScope.addItem(juce::String(part+1),firstPartId+part);
+                partScope.onChange=[this] { selectPart(); };
+            } else if(isSwitch) {
                 toggles[i].setTooltip(help);
                 buttonAttachments[i]=std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(state,ids[i],toggles[i]);
             } else if (isChoice) {
@@ -228,46 +246,87 @@ public:
         setSize(700,juce::jlimit(700,762,availableHeight-50));
         showPage(); timerCallback(); startTimerHz(2);
     }
-    ~BridgeEditor() override { stopTimer(); setVisible(false); }
-    void configureStandalone(std::function<void(int)> applyMap) {
+    ~BridgeEditor() override {
+        stopTimer();
+        if(keyboardStrip) { removeKeyListener(this);keyboardStrip.reset(); }
+        setVisible(false);
+    }
+    void configureStandalone(std::function<void(int)> applyMap,std::function<void(juce::MidiMessage)> playNote) {
+        if(playNote && !keyboardStrip) {
+            keyboardStrip=std::make_unique<scbridge::MusicalKeyboardStrip>(std::move(playNote));
+            keyboardStrip->refresh=[this] { syncMusicalKeyboard(); };
+            addChildComponent(*keyboardStrip);
+            keyboardButton.setComponentID("musicalKeyboard");
+            keyboardButton.setButtonText("Musical Keyboard");
+            keyboardButton.setName("Musical Keyboard");
+            keyboardButton.setToggleable(true);
+            keyboardButton.setExplicitFocusOrder(102);
+            keyboardButton.getProperties().set(scbridge::explicitHelpProperty,
+                "Play the selected part. A S D F G H J K L, semicolon and apostrophe are white keys; W E T Y U O P are sharps. Z and X change octave; C and V change velocity. Escape closes the keyboard. Entering a value pauses it until you finish. With All selected, the last numbered part plays.");
+#ifndef _WIN32
+            keyboardButton.setHelpText(scbridge::contextHelp(keyboardButton));
+#endif
+            keyboardButton.onClick=[this] { toggleMusicalKeyboard(); };
+            addAndMakeVisible(keyboardButton);
+            addKeyListener(this);
+            for(auto& slider:sliders) slider.onEntryChanged=[this] { syncMusicalKeyboard(); };
+            latency.onEntryChanged=[this] { syncMusicalKeyboard(); };
+            resized();
+        }
+        if(!applyMap) return;
         if(mapAll) return;
         mapAll=std::move(applyMap);
         choices[1].addKeyListener(this);
-        sliders[0].setComponentID("selectedPartParameter");
-        partScope.setComponentID("part");partScope.setName("Part");partScope.setTitle("Part");
-        partScope.setDescription("Part");
         partScope.getProperties().set(scbridge::explicitHelpProperty,"Select a part from 1 to 16, or All to apply the next Sound Map choice to every part. All does not broadcast other controls; part-specific controls are unavailable until you select a numbered part. Incoming MIDI keeps its own routing.");
-        partScope.setWantsKeyboardFocus(true);
-        partScope.addItem("All (Sound Map)",1);
-        for(int part=1;part<=16;++part) partScope.addItem(juce::String(part),part+1);
-        partScope.setSelectedId(static_cast<int>(sliders[0].getValue())+2,juce::dontSendNotification);
-        partScope.onChange=[this] {
-            const bool all=partScope.getSelectedId()==1;
-            if(all==allParts && all) return;
-            allParts=all;
-            if(all) {
-                lastRequestedMap=0;
-                choiceAttachments[1].reset();
-                choices[1].setTextWhenNothingSelected("Choose map for all parts");
-                choices[1].setSelectedId(0,juce::dontSendNotification);
-                choices[1].setText({},juce::dontSendNotification);
-                choices[1].onChange=[this] {
-                    const int map=choices[1].getSelectedId();
-                    if(!allParts || map<=0) return;
-                    lastRequestedMap=map;
-                    const auto name=choices[1].getItemText(map-1);
-                    mapAll(map);
-                    // Leave the menu unselected so the same map can be requested again after external MIDI.
-                    choices[1].setText("Last requested: "+name,juce::dontSendNotification);
-                };
-            } else {
-                choices[1].onChange=nullptr;
-                auto* part=parameters.getParameter(ids[0]);part->beginChangeGesture();
-                part->setValueNotifyingHost(part->convertTo0to1(static_cast<float>(partScope.getSelectedId()-2)));part->endChangeGesture();
-                choiceAttachments[1]=std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(parameters,ids[1],choices[1]);
-            }
-            updateEnabledControls();
-        };
+        // Keep stable IDs and place All first for the existing keyboard order.
+        partScope.clear(juce::dontSendNotification);
+        partScope.addItem("All (Sound Map)",allPartsId);
+        for(int part=0;part<16;++part) partScope.addItem(juce::String(part+1),firstPartId+part);
+        shownPartTones.reset();
+        refreshPartNames();
+        setStandaloneMapHelp();
+    }
+    void toggleMusicalKeyboard() {
+        if(!keyboardStrip || !isShowing() || browser.isVisible() || isEnteringValue() || keyboardStrip->isEnteringSetting()) return;
+        if(status.hasKeyboardFocus(true) || keyboardStrip->hasKeyboardFocus(true)) keyboardButton.grabKeyboardFocus();
+        keyboardArmed=!keyboardArmed;
+        keyboardButton.setToggleState(keyboardArmed,juce::dontSendNotification);
+        keyboardStrip->setArmed(keyboardArmed,readRhythm());
+        syncMusicalKeyboard();
+    }
+    void selectPart() {
+        const int selected=partScope.getSelectedId();
+        if(!selected) return;
+        const bool all=mapAll && selected==allPartsId;
+        if(all && allParts) return;
+        const bool wasAll=allParts;
+        allParts=all;
+        if(all) {
+            lastRequestedMap=0;
+            choiceAttachments[1].reset();
+            choices[1].setTextWhenNothingSelected("Choose map for all parts");
+            choices[1].setSelectedId(0,juce::dontSendNotification);
+            choices[1].setText({},juce::dontSendNotification);
+            choices[1].onChange=[this] {
+                const int map=choices[1].getSelectedId();
+                if(!allParts || map<=0) return;
+                lastRequestedMap=map;
+                const auto name=choices[1].getItemText(map-1);
+                mapAll(map);
+                // Leave the menu unselected so the same map can be requested again after external MIDI.
+                choices[1].setText("Last requested: "+name,juce::dontSendNotification);
+            };
+        } else {
+            if(wasAll) choices[1].onChange=nullptr;
+            if(keyboardStrip && typingPart()!=selected-firstPartId+1) keyboardStrip->releaseNotes();
+            auto* part=parameters.getParameter(ids[0]);part->beginChangeGesture();
+            part->setValueNotifyingHost(part->convertTo0to1(static_cast<float>(selected-firstPartId)));part->endChangeGesture();
+            if(wasAll) choiceAttachments[1]=std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(parameters,ids[1],choices[1]);
+        }
+        updateEnabledControls();
+        syncMusicalKeyboard();
+    }
+    void setStandaloneMapHelp() {
         const auto mapHelp="With a numbered part selected, changes that part's map. With All selected, applies the chosen map to all 16 parts without changing their bank, program, mixer or effects. This is the last requested map; subsequent MIDI can override individual parts.";
 #ifdef SCBRIDGE_WINDOWS7
         choices[1].getProperties().set(scbridge::explicitHelpProperty,mapHelp);
@@ -275,12 +334,13 @@ public:
         choices[1].setHelpText(mapHelp);
         choices[1].setTooltip(choices[1].getHelpText());
 #endif
-        sliders[0].setVisible(false);addAndMakeVisible(partScope);showPage();
     }
     void resized() override {
         browser.setBounds(getLocalBounds());
-        pageLabel.setBounds(12,10,120,30);page.setBounds(142,10,getWidth()-280,30);
-        browse.setBounds(getWidth()-126,10,114,30);
+        const int keyboardWidth=keyboardStrip ? 150 : 0;
+        pageLabel.setBounds(12,10,120,30);page.setBounds(142,10,getWidth()-280-keyboardWidth,30);
+        browse.setBounds(getWidth()-126-keyboardWidth,10,114,30);
+        if(keyboardStrip) keyboardButton.setBounds(getWidth()-12-140,10,140,30);
         currentSound.setBounds(12,44,getWidth()-24,28);
         const int rowHeight=std::min(36,(getHeight()-212)/16);
         int row=0;
@@ -291,9 +351,39 @@ public:
         }
         latencyLabel.setBounds(12, getHeight()-134, 200, 30); latency.setBounds(214, getHeight()-134, getWidth() - 226, 30);
         status.setBounds(12, getHeight()-92, getWidth() - 24, 80);
+        if(keyboardStrip) keyboardStrip->setBounds(status.getBounds());
     }
 private:
+    int typingPart() const { return 1+static_cast<int>(parameters.getRawParameterValue(ids[0])->load()); }
+    bool isEnteringValue() const {
+        return latency.isEnteringValue() || std::any_of(sliders.begin(),sliders.end(),
+            [](const auto& slider) { return slider.isEnteringValue(); });
+    }
+    void syncMusicalKeyboard() {
+        if(!keyboardStrip) return;
+        const auto* focus=getCurrentlyFocusedComponent();
+        const bool playing=keyboardArmed && isShowing() && focus && (focus==this || isParentOf(focus)) &&
+            !browser.isVisible() && !isEnteringValue() && !isCurrentlyBlockedByAnotherModalComponent();
+        if(playing) {
+            if(status.hasKeyboardFocus(true)) keyboardButton.grabKeyboardFocus();
+            const auto channel=typingPart();
+            keyboardStrip->setPart(channel,partScope.getItemText(channel-(mapAll ? 0 : 1)));
+        }
+        keyboardStrip->setPlaying(playing);
+        status.setVisible(!playing && !browser.isVisible());
+    }
+    bool keyStateChanged(bool down,juce::Component* origin) override {
+        if(!down && keyboardStrip && origin==this) keyboardStrip->releaseKeysUp();
+        return false;
+    }
     bool keyPressed(const juce::KeyPress& key,juce::Component* origin) override {
+        if(keyboardStrip && keyboardArmed && origin==this) {
+            syncMusicalKeyboard();
+            if(keyboardStrip->isVisible() && key==juce::KeyPress(juce::KeyPress::escapeKey)) {
+                toggleMusicalKeyboard();return true;
+            }
+            if(keyboardStrip->playKey(key)) return true;
+        }
         if(!allParts || origin!=&choices[1] || !choices[1].isEnabled() || choices[1].isPopupActive() ||
            key.getModifiers().isAnyModifierKeyDown()) return false;
         const int count=choices[1].getNumItems(),code=key.getKeyCode();
@@ -315,7 +405,7 @@ private:
         return true;
     }
     juce::Component& controlAt(unsigned i) {
-        if(i==0 && mapAll) return partScope;
+        if(i==0) return partScope;
         if(scbridge::controls[i].unit==scbridge::ControlUnit::Switch) return toggles[i];
         if(choiceControl(i)) return choices[i];
         return sliders[i];
@@ -360,7 +450,7 @@ private:
             else currentSound.setText(name,juce::dontSendNotification);
             if(auto* handler=currentSound.getAccessibilityHandler()) handler->notifyAccessibilityEvent(juce::AccessibilityEvent::valueChanged);
         }
-        if(mapAll && !allParts) partScope.setSelectedId(static_cast<int>(sliders[0].getValue())+2,juce::dontSendNotification);
+        refreshPartNames();
         auto* focus = juce::Component::getCurrentlyFocusedComponent();
         if (!latency.isMouseButtonDown() && !(focus && latency.isParentOf(focus)))
             latency.setValue(readLatency(), juce::dontSendNotification);
@@ -369,6 +459,21 @@ private:
         status.setText(text, juce::dontSendNotification);
         if (auto* handler = status.getAccessibilityHandler())
             handler->notifyAccessibilityEvent(juce::AccessibilityEvent::valueChanged);
+    }
+    void refreshPartNames() {
+        const auto tones=readPartTones();
+        for(size_t part=0;part<tones.size();++part) {
+            const auto& tone=tones[part];
+            if(shownPartTones && (*shownPartTones)[part]==tone) continue;
+            const auto* entry=scbridge::findProgram(tone.map,tone.bank,tone.program,tone.drums);
+            const auto name=entry ? juce::String(entry->name) :
+                "Unlisted sound, bank "+juce::String(tone.bank)+", program "+juce::String(tone.program+1);
+            partScope.changeItemText(firstPartId+static_cast<int>(part),juce::String(part+1)+": "+name);
+        }
+        shownPartTones=tones;
+        const auto selected=static_cast<int>(parameters.getRawParameterValue(ids[0])->load());
+        const auto id=allParts ? allPartsId : firstPartId+selected;
+        partScope.setSelectedId(id,juce::dontSendNotification);
     }
     void updateEnabledControls() {
         browse.setEnabled(!allParts);
@@ -381,6 +486,7 @@ private:
     }
     void showBrowser(bool visible) {
         if(visible) {
+            if(keyboardStrip) keyboardStrip->setPlaying(false);
             browserHidden.clear();
             for(auto* child:getChildren()) if(child!=&browser && child->isVisible()) {
                 browserHidden.emplace_back(child);child->setVisible(false);
@@ -392,6 +498,7 @@ private:
         browser.setVisible(visible);
         if(visible) { browser.toFront(false);browser.focusSearch(); }
         else { showPage();browse.grabKeyboardFocus(); }
+        syncMusicalKeyboard();
     }
     juce::AudioProcessorValueTreeState& parameters;
     std::function<void(int)> mapAll;
@@ -403,6 +510,8 @@ private:
     std::function<bool()> readAdvanced;
     std::function<int()> readProgram;
     std::function<bool()> readRhythm;
+    std::function<PartTones()> readPartTones;
+    std::optional<PartTones> shownPartTones;
     scbridge::ProgramBrowser browser;
     juce::TextButton browse;
     scbridge::PresetSelector currentSound;
@@ -422,6 +531,9 @@ private:
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>, scbridge::parameterCount> buttonAttachments;
     std::array<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>, scbridge::parameterCount> attachments;
     juce::Label status;
+    juce::TextButton keyboardButton;
+    std::unique_ptr<scbridge::MusicalKeyboardStrip> keyboardStrip;
+    bool keyboardArmed=false;
 };
 
 class Processor final : public juce::AudioProcessor, private juce::Thread,
@@ -516,7 +628,8 @@ public:
 #endif
         }, [this] { return advancedReady.load(); }, [this] { return catalogueProgram(); },
            [this](int index) { return selectFactoryProgram(index); },
-           [this] { return scbridge::rhythmPart(rhythmParts.load(),static_cast<int>(std::lround(values[0]->load()))); });
+           [this] { return scbridge::rhythmPart(rhythmParts.load(),static_cast<int>(std::lround(values[0]->load()))); },
+           [this] { return partTones(); });
     }
     void prepareToPlay(double rate, int maximum) override {
         releaseResources();
@@ -860,6 +973,27 @@ public:
         }
     }
 private:
+    PartTones partTones() const {
+        PartTones result{};
+        const auto epoch=stateEpoch.load();
+        scbridge::StateFrame frame;
+        // Legacy addresses are populated by the MIDI mirror even when the
+        // engine cannot supply a complete, serialisable advanced scene.
+        const bool captured=capturedState.read(frame) && frame.epoch==epoch;
+        const bool saved=!captured && restoredState.read(frame) && frame.epoch==epoch && frame.sceneValid;
+        for(size_t part=0;part<result.size();++part) {
+            if(captured || saved) {
+                const auto& tone=frame.scene.legacy[part];
+                result[part]={tone[0],tone[1],tone[2],frame.scene.partModes[part]!=0};
+            } else result[part].drums=scbridge::rhythmPart(scbridge::defaultRhythmParts,static_cast<int>(part));
+        }
+        const auto request=factoryRequested.load();
+        if(request && request!=(captured ? frame.factoryRequest : factoryAcknowledged.load())) {
+            if(const auto* tone=scbridge::programAt(static_cast<size_t>(scbridge::programRequestIndex(request))))
+                result[static_cast<size_t>(scbridge::programRequestPart(request))]={tone->map,tone->bank,tone->program,tone->drums};
+        }
+        return result;
+    }
     bool flatHostProgram() const { return wrapperType==wrapperType_VST3 || wrapperType==wrapperType_AudioUnit; }
     struct FactoryTransaction {
         uint64_t request=0,start=0;
@@ -1247,8 +1381,12 @@ private:
 };
 }
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new Processor(); }
-void scbridge::configureStandaloneEditor(juce::AudioProcessorEditor& editor,std::function<void(int)> applyMapToAll) {
-    if(auto* bridge=dynamic_cast<BridgeEditor*>(&editor)) bridge->configureStandalone(std::move(applyMapToAll));
+void scbridge::configureStandaloneEditor(juce::AudioProcessorEditor& editor,std::function<void(int)> applyMapToAll,
+                                        std::function<void(juce::MidiMessage)> playNote) {
+    if(auto* bridge=dynamic_cast<BridgeEditor*>(&editor)) bridge->configureStandalone(std::move(applyMapToAll),std::move(playNote));
+}
+void scbridge::toggleStandaloneMusicalKeyboard(juce::AudioProcessorEditor& editor) {
+    if(auto* bridge=dynamic_cast<BridgeEditor*>(&editor)) bridge->toggleMusicalKeyboard();
 }
 bool scbridge::standaloneMapSelection(juce::AudioProcessor& processor,int map,std::array<ControlMessage,32>& messages) {
     if(auto* bridge=dynamic_cast<Processor*>(&processor)) return bridge->standaloneMapSelection(map,messages);
