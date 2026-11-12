@@ -25,7 +25,7 @@ Each platform has its own installer and update channel.
 
 **[Windows installer and release notes](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/windows-v1.4.4)**
 
-**[Windows 7 SP1 portable edition](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/windows7-v1.4.3)** ([setup guide](Resources/Windows7Manual.html))
+**[Windows 7 SP1 portable edition](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/windows7-v1.4.4)** ([setup guide](Resources/Windows7Manual.html))
 
 **[Mac installer and release notes](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/v1.4.4)**
 
