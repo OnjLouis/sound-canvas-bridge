@@ -120,6 +120,15 @@ BoxedWine compatibility worker; Intel selects the original Mac engine backend.
 `Source/Backend.h` makes that choice per architecture, not per build machine.
 A build does not install anything automatically.
 
+Mac bundles also contain `Sound Canvas Engine.app`, a small launch adapter for
+sandboxed AU hosts. It accepts a private, owner-only session document, verifies
+the caller and nonce, receives one size-checked shared-memory descriptor, then
+executes the existing helper with the standalone's configured engine. Normal
+hosts keep the direct-spawn path and the audio protocol is unchanged. Sign this
+nested app before the containing plug-in, preserving the synthesis helper's
+existing entitlements. Missing-engine guidance is editor status, not a modal
+window owned by a headless host.
+
 `cmake/BuildTranslatedEngine.py` verifies the pinned BoxedWine archive, applies
 the published overrides, generates the headless SDL/BoxedWine Xcode project and
 builds the helper. The overrides add the exercised SSE3 instruction handling and

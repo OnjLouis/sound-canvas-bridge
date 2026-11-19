@@ -2,6 +2,10 @@
 <html lang="en-GB"><head><meta charset="utf-8"><title>Sound Canvas Bridge Version History</title>
 <style>body{max-width:50rem;margin:2rem auto;padding:0 1rem;font:1rem/1.6 system-ui;color:#181818;background:#fff}</style></head>
 <body><main><h1>Sound Canvas Bridge Version History</h1>
+<h2>1.4.5 - 19 November 2026 (Mac)</h2>
+<ul><li>Fix engine startup in sandboxed Mac AU hosts such as Cog, using the engine configured in the standalone app without lowering host security.</li>
+<li>Missing-engine playback no longer opens an undismissable modal alert or crashes a headless host during plug-in unloading. Setup guidance remains in Engine status.</li>
+<li>Existing plug-in identities, NKS files, audio transport and engine files are unchanged.</li></ul>
 <h2>1.4.4</h2>
 <ul><li>Part lists the current sound for every MIDI part in the standalone app and plug-ins. Changing the selected part does not load a new sound.</li>
 <li>Musical Keyboard auditions the selected part from the standalone controls (Command+K on Mac, Control+K on Windows), with playable keys through the upper F and separate Octave and Velocity sliders. It pauses automatically during direct value entry and preset search.</li>

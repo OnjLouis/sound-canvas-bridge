@@ -6,8 +6,13 @@ beside Browse in **General** preferences. Native extraction selects the supporte
 without running either downloaded installer. Browse remains available if the download changes
 or disappears. Downloads and engine selection do not modify NKS files or previews.
 First launch and missing-engine recovery open General automatically. If a hosted
-plug-in has no engine, it directs you to the standalone app for setup; downloads
-never run inside the audio host.
+plug-in has no engine, its Engine status directs you to the standalone app for
+setup; downloads never run inside the audio host. Headless playback does not
+open a setup dialog.
+
+Sandboxed Mac hosts such as Cog use an independently launched engine helper,
+which reads the engine selected in the standalone app. No separate engine setup
+or reduction of the host's security settings is required.
 
 Mac AU/VST3 and Windows VST3 plug-ins, with a standalone MIDI module on both platforms, for **existing Sound Canvas VA owners**.
 Use the original installed synthesis engine in modern VST3 hosts on either platform.
@@ -27,7 +32,7 @@ Each platform has its own installer and update channel.
 
 **[Windows 7 SP1 portable edition](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/windows7-v1.4.4)** ([setup guide](Resources/Windows7Manual.html))
 
-**[Mac installer and release notes](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/v1.4.4)**
+**[Mac installer and release notes](https://github.com/OnjLouis/sound-canvas-bridge/releases/tag/v1.4.5)**
 
 [All releases](https://github.com/OnjLouis/sound-canvas-bridge/releases)
 

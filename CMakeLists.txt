@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.22)
 if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
     set(CMAKE_OSX_DEPLOYMENT_TARGET 12.0 CACHE STRING "Minimum macOS version")
 endif()
-project(OnjSoundCanvasPilot VERSION 1.4.4 LANGUAGES C CXX)
+project(OnjSoundCanvasPilot VERSION 1.4.5 LANGUAGES C CXX)
 if(APPLE)
     enable_language(OBJCXX)
     option(SCBRIDGE_USE_TRANSLATED_ENGINE "Use the native Mac compatibility worker" ON)
@@ -42,7 +42,8 @@ endif()
 set(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/Source")
 set(scbridge_processor_sources "${SOURCE}/Processor.cpp")
 if(APPLE)
-    list(APPEND scbridge_processor_sources "${SOURCE}/KeyboardAnnouncement.mm")
+    list(APPEND scbridge_processor_sources "${SOURCE}/KeyboardAnnouncement.mm" "${SOURCE}/MacEngineLaunch.mm")
+    link_libraries("-framework Security")
 elseif(NOT SCBRIDGE_WINDOWS7)
     list(APPEND scbridge_processor_sources "${SOURCE}/KeyboardAnnouncementWindows.cpp")
 endif()
@@ -59,7 +60,7 @@ juce_add_plugin(SoundCanvasBridge
     PLUGIN_MANUFACTURER_CODE OnjM PLUGIN_CODE ScCB
     FORMATS ${SCBRIDGE_FORMATS} IS_SYNTH TRUE NEEDS_MIDI_INPUT TRUE NEEDS_MIDI_OUTPUT FALSE
     VST3_AUTO_MANIFEST ${SCBRIDGE_AUTO_MANIFEST}
-    COPY_PLUGIN_AFTER_BUILD FALSE PRODUCT_NAME "Sound Canvas Bridge")
+    COPY_PLUGIN_AFTER_BUILD FALSE AU_SANDBOX_SAFE TRUE PRODUCT_NAME "Sound Canvas Bridge")
 if(APPLE)
     set_target_properties(SoundCanvasBridge SoundCanvasBridge_AU SoundCanvasBridge_VST3
         PROPERTIES OSX_ARCHITECTURES "${SCBRIDGE_MAC_ARCHITECTURES}")
@@ -82,6 +83,23 @@ target_link_libraries(SoundCanvasStandalone PRIVATE juce::juce_audio_utils juce:
 include(cmake/OfficialEngine.cmake)
 
 if(APPLE)
+add_executable(SoundCanvasEngineLauncher MACOSX_BUNDLE "${SOURCE}/MacEngineLauncher.mm")
+set_target_properties(SoundCanvasEngineLauncher PROPERTIES
+    OSX_ARCHITECTURES "${SCBRIDGE_MAC_ARCHITECTURES}"
+    OUTPUT_NAME "Sound Canvas Engine"
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Resources/EngineLauncherInfo.plist.in")
+target_compile_definitions(SoundCanvasEngineLauncher PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_link_libraries(SoundCanvasEngineLauncher PRIVATE juce::juce_audio_utils juce::juce_recommended_config_flags)
+target_link_options(SoundCanvasEngineLauncher PRIVATE "-Wl,-dead_strip")
+foreach(target SoundCanvasStandalone SoundCanvasBridge_AU SoundCanvasBridge_VST3)
+    add_dependencies(${target} SoundCanvasEngineLauncher)
+    set_property(TARGET ${target} APPEND PROPERTY LINK_DEPENDS "$<TARGET_FILE:SoundCanvasEngineLauncher>")
+    add_custom_command(TARGET ${target} POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_directory "$<TARGET_BUNDLE_DIR:SoundCanvasEngineLauncher>"
+            "$<TARGET_BUNDLE_DIR:${target}>/Contents/Helpers/Sound Canvas Engine.app"
+        COMMAND "${CMAKE_COMMAND}" -E rm -rf "$<TARGET_BUNDLE_DIR:${target}>/Contents/Resources/Sound Canvas Engine.app"
+        VERBATIM)
+endforeach()
 if(SCBRIDGE_USE_TRANSLATED_ENGINE)
     include(cmake/TranslatedEngine.cmake)
     scbridge_copy_translated_runtime(SoundCanvasStandalone)
@@ -322,6 +340,15 @@ if(BUILD_TESTING)
         target_link_libraries(PluginUiTests PRIVATE avrt)
     endif()
     add_test(NAME PluginUi COMMAND PluginUiTests)
+    add_test(NAME HeadlessEngineSetup COMMAND PluginUiTests --missing-engine-headless)
+    set_tests_properties(HeadlessEngineSetup PROPERTIES TIMEOUT 20
+        ENVIRONMENT "SCBRIDGE_PROFILE_DIR=${CMAKE_CURRENT_BINARY_DIR}/headless-setup-test-profile")
+    if(APPLE)
+        add_executable(MacEngineSessionTests Tests/MacEngineSessionTests.cpp)
+        target_include_directories(MacEngineSessionTests PRIVATE Source)
+        target_compile_options(MacEngineSessionTests PRIVATE -UNDEBUG)
+        add_test(NAME MacEngineSession COMMAND MacEngineSessionTests)
+    endif()
     juce_add_console_app(ProgramBrowserTests PRODUCT_NAME "Program Browser Tests")
     target_sources(ProgramBrowserTests PRIVATE Tests/ProgramBrowserTests.cpp)
     target_include_directories(ProgramBrowserTests PRIVATE Source)

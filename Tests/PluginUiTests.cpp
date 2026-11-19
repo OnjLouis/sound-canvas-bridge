@@ -4,6 +4,7 @@
 #include <set>
 #include "../Source/ProgramBrowser.h"
 #include "../Source/Controls.h"
+#include "../Source/Performance.h"
 #include "KeyboardChoiceFixture.h"
 #ifdef _WIN32
 #include "../Source/EngineLocation.h"
@@ -53,6 +54,54 @@ static bool testLivePartNames(const char* mockCore) {
 
 int main(int argc,char** argv) {
     juce::ScopedJuceInitialiser_GUI gui;
+    if(argc==2 && juce::String(argv[1])=="--sandbox-audio") {
+        std::unique_ptr<juce::AudioProcessor> processor(createPluginFilter());
+        processor->setNonRealtime(true);processor->prepareToPlay(48000,128);
+        juce::AudioBuffer<float> audio(2,128);juce::MidiBuffer midi;
+        midi.addEvent(juce::MidiMessage::programChange(1,80),0);
+        midi.addEvent(juce::MidiMessage::noteOn(1,60,juce::uint8(100)),1);
+        double energy=0;int silentBlocks=0;bool finite=true;
+        for(int block=0;block<7500;++block) {
+            processor->processBlock(audio,midi);midi.clear();
+            double squared=0;
+            for(int sample=0;sample<audio.getNumSamples();++sample) {
+                const auto value=audio.getSample(0,sample);finite&=std::isfinite(value);squared+=double(value)*value;
+            }
+            if(block>100) {energy+=squared;if(squared<1e-12) ++silentBlocks;}
+        }
+        processor->releaseResources();processor.reset();
+        const bool passed=finite && energy>1 && silentBlocks==0;
+        const auto message=juce::String(passed ? "PASS" : "FAIL")+": 20-second helper audio; energy="+juce::String(energy)
+            +"; silent blocks="+juce::String(silentBlocks)+"; finite="+juce::String(finite ? 1 : 0)+"\n";
+        const auto result=juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory).getChildFile("CanvasSandboxAudioResult.txt");
+        result.replaceWithText(message);std::cout<<message;return passed ? 0 : 1;
+    }
+    if(argc==2 && juce::String(argv[1])=="--missing-engine-headless") {
+        const auto profile=juce::SystemStats::getEnvironmentVariable("SCBRIDGE_PROFILE_DIR",{});
+        if(profile.isEmpty()) return 2;
+        auto config=scbridge::performanceFile().getSiblingFile("Engine.xml");
+        config.getParentDirectory().createDirectory();
+        juce::XmlElement xml("PROPERTIES");
+        for(const auto* key:{"bundlePath","windows32CorePath"}) {
+            auto* value=xml.createNewChildElement("VALUE");
+            value->setAttribute("name",key);value->setAttribute("val",config.getSiblingFile("missing/SCCore.dll").getFullPathName());
+        }
+        if(!xml.writeTo(config)) return 2;
+        juce::AudioProcessor::setTypeOfNextNewPlugin(juce::AudioProcessor::wrapperType_AudioUnit);
+        std::unique_ptr<juce::AudioProcessor> processor(createPluginFilter());
+        juce::AudioProcessor::setTypeOfNextNewPlugin(juce::AudioProcessor::wrapperType_Undefined);
+        processor->prepareToPlay(48000,128);
+        juce::AudioBuffer<float> audio(2,128);juce::MidiBuffer midi;
+        midi.addEvent(juce::MidiMessage::noteOn(1,60,juce::uint8(100)),0);
+        processor->processBlock(audio,midi);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(500);
+        const bool noModal=juce::ModalComponentManager::getInstance()->getNumModalComponents()==0;
+        juce::ModalComponentManager::getInstance()->cancelAllModalComponents();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+        processor->releaseResources();
+        std::cout<<(noModal ? "PASS" : "FAIL")<<": headless missing-engine playback must not create a modal alert\n";
+        return noModal ? 0 : 1;
+    }
 #ifdef _WIN32
     if(argc==3 && juce::String(argv[1])=="--part-midi") {
         const bool passed=testLivePartNames(argv[2]);

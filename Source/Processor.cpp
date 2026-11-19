@@ -16,6 +16,7 @@
 #ifdef _WIN32
 #include "WindowsIpc.h"
 #else
+#include "MacEngineLaunch.h"
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
@@ -31,7 +32,6 @@ extern char** environ;
 #endif
 
 namespace {
-std::atomic<bool> engineSetupNoticeShown{false};
 void moduleAnchor() {}
 constexpr auto ids=[] { std::array<const char*,scbridge::parameterCount> value{};
     for(unsigned i=0;i<scbridge::parameterCount;++i) value[i]=scbridge::controls[i].id;return value; }();
@@ -675,13 +675,15 @@ public:
         if (!dladdr(reinterpret_cast<void*>(&moduleAnchor), &module) || !module.dli_fname) return;
         auto helper = juce::File(juce::String::fromUTF8(module.dli_fname)).getParentDirectory()
                           .getParentDirectory().getChildFile("Resources/SoundCanvasHelper");
-        if(!core.existsAsFile()) { engineStatus.store(3);return; }
+        const bool sandbox=scbridge::sandboxedHost();
+        if(!sandbox && !core.existsAsFile()) { engineStatus.store(3);return; }
         if(!helper.existsAsFile()) { engineStatus.store(5);return; }
         // Darwin limits POSIX shared-memory names to 31 bytes including terminator.
         auto memoryName = "/onjsc-" + juce::Uuid().toString().removeCharacters("-").substring(0, 20);
-        memory = shm_open(memoryName.toRawUTF8(), O_CREAT | O_EXCL | O_RDWR, 0600);
+        memory = sandbox ? scbridge::createSandboxEngineMemory()
+                         : shm_open(memoryName.toRawUTF8(), O_CREAT | O_EXCL | O_RDWR, 0600);
         if (memory < 0) return;
-        shm_unlink(memoryName.toRawUTF8());
+        if(!sandbox) shm_unlink(memoryName.toRawUTF8());
         if (ftruncate(memory, sizeof(scbridge::Shared))) { releaseResources(); return; }
         shared = static_cast<scbridge::Shared*>(mmap(nullptr, sizeof(scbridge::Shared), PROT_READ | PROT_WRITE, MAP_SHARED, memory, 0));
         if (shared == MAP_FAILED) { shared = nullptr; releaseResources(); return; }
@@ -694,6 +696,15 @@ public:
         shared->restoreSceneValid=restoredState.read(restoration) ? restoration.sceneValid : 0;
         if(shared->restoreSceneValid) shared->restoredScene=restoration.scene;
 #ifndef _WIN32
+        if(sandbox) {
+            const auto launcher=helper.getParentDirectory().getSiblingFile("Helpers").getChildFile("Sound Canvas Engine.app");
+            if(!launcher.isDirectory()) {releaseResources();engineStatus.store(5);return;}
+            const int status=scbridge::launchSandboxEngine(launcher,memory,socket,child);
+            detachedHelper=child>0;
+            if(status!=1 || !receive('R',5000) || !exchange('S',5000)) {
+                releaseResources();engineStatus.store(status==1 ? 4 : status);return;
+            }
+        } else {
         int sockets[2];
         if (socketpair(AF_UNIX, SOCK_STREAM, 0, sockets)) { releaseResources(); return; }
         socket = sockets[0];
@@ -721,6 +732,7 @@ public:
         posix_spawn_file_actions_destroy(&actions); posix_spawnattr_destroy(&attributes);
         close(childSocket); close(childMemory);
         if (result || !receive('R', 5000) || !exchange('S', 5000)) { releaseResources(); return; }
+        }
 #else
         if(!exchange('S',5000)) { releaseResources();return; }
 #endif
@@ -743,7 +755,7 @@ public:
         windowsIpc.close();shared=nullptr;
 #else
         if (socket >= 0) { char quit = 'Q'; ::send(socket, &quit, 1, MSG_DONTWAIT); close(socket); socket = -1; }
-        if (child > 0) {
+        if (child > 0 && !detachedHelper) {
             for (int i = 0; i < 50; ++i) {
                 if (waitpid(child, nullptr, WNOHANG) == child) { child = -1; break; }
                 juce::Thread::sleep(10);
@@ -757,6 +769,7 @@ public:
                 if (child > 0) { kill(child, SIGKILL); waitpid(child, nullptr, 0); child = -1; }
             }
         }
+        child=-1;detachedHelper=false;
         if (shared) { munmap(shared, sizeof(*shared)); shared = nullptr; }
         if (memory >= 0) { close(memory); memory = -1; }
 #endif
@@ -766,11 +779,6 @@ public:
         auto frames = static_cast<uint32_t>(audio.getNumSamples());
         audio.clear();
         if (!healthy.load() || frames > scbridge::maxFrames || !frames) {
-            const bool hosted=wrapperType==wrapperType_VST3 || wrapperType==wrapperType_AudioUnit;
-            if(hosted && !isNonRealtime() && engineStatus.load()==3 && !engineSetupNoticeShown.load()) for(const auto item:midi)
-                if(scbridge::requestEngineSetupNotice(hosted,isNonRealtime(),engineStatus.load()==3,item.data,item.numBytes)) {
-                    engineSetupPending.store(true);break;
-                }
             midi.clear();return;
         }
         const bool offline = isNonRealtime();
@@ -1073,8 +1081,6 @@ private:
         }
     }
     void timerCallback() override {
-        if(engineSetupPending.exchange(false) && engineStatus.load()==3 && !engineSetupNoticeShown.exchange(true))
-            juce::AlertWindow::showMessageBoxAsync(juce::MessageBoxIconType::WarningIcon,"Sound Canvas engine setup",scbridge::engineSetupGuidance);
 #ifdef _WIN32
         if(++preferenceTicks>=10) {
             preferenceTicks=0;preferences.reload();requestedLatency.store(preferences.getLatency());
@@ -1363,11 +1369,11 @@ private:
     int preferenceTicks=0;
 #else
     int socket = -1, memory = -1; pid_t child = -1;
+    bool detachedHelper=false;
 #endif
     std::atomic<bool> healthy{false};
     std::atomic<bool> workerRealtime{false}, helperRealtime{false};
     std::atomic<int> engineStatus{0};
-    std::atomic<bool> engineSetupPending{false};
     std::atomic<uint32_t> gaps{0};
     std::atomic<uint64_t> missingSamples{0};
     std::atomic<int> lastBlock{0};
